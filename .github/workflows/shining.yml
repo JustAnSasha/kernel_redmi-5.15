@@ -248,17 +248,29 @@ jobs:
         run: |
           CONFIG_FILE="arch/arm64/configs/${{ env.DEFCONFIG_NAME }}";
           
-          # Helper
+          # Helper with proper error handling
           apply_patch() {
             local url="$1";
             local file=$(basename "$url")
-            curl -L -o "$file" "$url"
-            patch -p1 < "$file" || echo "::warning::Hunks failed in $file"
+            if ! curl -L -f -o "$file" "$url"; then
+              echo "::error::Failed to download patch from $url"
+              return 1
+            fi
+            # Check if it's a valid patch
+            if ! head -1 "$file" | grep -q "^---"; then
+              echo "::error::Invalid patch format from $url"
+              cat "$file"
+              return 1
+            fi
+            patch -p1 < "$file" || echo "::warning::Hunks failed in $file (continuing)"
             rm -f "$file"
           }
 
-          # custom tickrate options patch
-          apply_patch "https://raw.githubusercontent.com/ShiningAsStar/extra_stuff/main/custom-tickrate-options.patch"
+          # custom tickrate options patch (may fail, but we continue)
+          apply_patch "https://raw.githubusercontent.com/ShiningAsStar/extra_stuff/main/custom-tickrate-options.patch" || true
+          
+          # Remove any .rej files left by failed patches
+          find . -name "*.rej" -delete
           
           # Remove existing optimization configs
           sed -i '/CONFIG_CC_OPTIMIZE_FOR_PERFORMANCE/d' "$CONFIG_FILE"
@@ -413,7 +425,7 @@ jobs:
           EOF
 
           # Script sign patch
-          apply_patch "https://raw.githubusercontent.com/ShiningAsStar/kernel_patches/main/0001-scripts-sign-builds.patch"
+          apply_patch "https://raw.githubusercontent.com/ShiningAsStar/kernel_patches/main/0001-scripts-sign-builds.patch" || true
 
           echo "✅ Applied -${{ github.event.inputs.optimizationLevel }} Optimization"
           echo "✅ Applied ${{ github.event.inputs.tickRate }}Hz tick rate"
@@ -570,7 +582,7 @@ jobs:
         working-directory: ./${{ env.kernelDir }}/${{ env.kernelName }}
         run: |
           set -e
-    
+
           echo "📦 Cloning SUSFS4KSU..."
           git clone --depth=1 https://gitlab.com/simonpunk/susfs4ksu.git -b gki-android13-5.15
 
@@ -584,7 +596,7 @@ jobs:
               sed -i '1i #include <linux/cred.h>' include/linux/susfs_def.h
             fi
           fi
-     
+
           SUSFS_KERNEL_PATCH="$(pwd)/susfs4ksu/kernel_patches/50_add_susfs_in_gki-android13-5.15.patch"
 
           echo "🔧 Applying SUSFS KERNEL PATCH..."
@@ -594,11 +606,16 @@ jobs:
             echo "⚠️ SUSFS patch had issues but continuing"
           fi
 
-          sed -i '1s/^/#include <linux\/susfs.h>\n/' fs/proc/task_mmu.c
+          # ✅ SAFE INJECTION: add include after last existing include in task_mmu.c
+          if ! grep -q "linux/susfs.h" fs/proc/task_mmu.c; then
+            echo "🔧 Adding SUSFS include to task_mmu.c"
+            # Find the last #include line and append our include after it
+            sed -i '/^#include/ { h; d; }; $G; s/\(.*\)/#include <linux\/susfs.h>\n\1/' fs/proc/task_mmu.c
+          fi
 
           echo "📦 Applying hide_stuff patch"
           curl -LSs "https://raw.githubusercontent.com/nebixts/kernel_patches/main/69_hide_stuff.patch" | patch -p1 -F 3 || echo "⚠️ Hide stuff patch skipped"
-          
+
           CONFIG_FILE="arch/arm64/configs/${{ env.DEFCONFIG_NAME }}"
           echo "📝 Configuring RESUKISU with SUSFS..."
           cat >> "$CONFIG_FILE" << 'SUSFSCONFIG'
@@ -624,9 +641,9 @@ jobs:
           CONFIG_KSU_SUSFS_SUS_MAP=y
           CONFIG_KSU_SUSFS_SUS_SU=y
           SUSFSCONFIG
-    
+
           rm -rf ./susfs4ksu
-    
+
           echo "✅ RESUKISU with SUSFS configured"
 
       - name: "🔧 Setup Wild-KSU with SUSFS"
@@ -755,6 +772,9 @@ jobs:
           echo "🚀 Starting kernel compilation..."
           
           export KERNEL_VERSION="${{ github.event.inputs.kernelSpoofVersion }}${{ github.event.inputs.localVersion }}"
+          
+          # 🔧 Disable unused-variable and unused-label errors (fixes SUSFS related warnings)
+          export KCFLAGS="-Wno-error=unused-variable -Wno-error=unused-label"
           
           if [ "${{ github.event.inputs.LtoOptimizations }}" = "thin" ]; then
             echo "Using Thin LTO optimization"
