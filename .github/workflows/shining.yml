@@ -667,6 +667,8 @@ jobs:
             echo "⚠️ SUSFS patch failed — common on non-GKI"
           fi
 
+          sed -i '1s/^/#include <linux\/susfs.h>\n/' fs/proc/task_mmu.c
+
           echo "📦 Applying hide_stuff patch"
           curl -LSs "https://raw.githubusercontent.com/nebixts/kernel_patches/main/69_hide_stuff.patch" | patch -p1 -F 3 || echo "⚠️ Hide stuff patch skipped"
           
