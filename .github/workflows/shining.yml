@@ -456,6 +456,12 @@ jobs:
           if [ -f susfs4ksu/kernel_patches/include/linux/susfs_def.h ]; then
             cp -f susfs4ksu/kernel_patches/include/linux/susfs_def.h include/linux/susfs_def.h
             echo "✔ Copied include/linux/susfs_def.h"
+            
+            # FIX: Add missing <linux/cred.h> include for current_uid()
+            if ! grep -q "#include <linux/cred.h>" include/linux/susfs_def.h; then
+              sed -i '1i #include <linux/cred.h>' include/linux/susfs_def.h
+              echo "✔ Fixed: Added #include <linux/cred.h> to susfs_def.h"
+            fi
           else
             echo "⚠️ susfs_def.h not found in repo"
           fi
@@ -557,6 +563,12 @@ jobs:
           if [ -f susfs4ksu/kernel_patches/include/linux/susfs_def.h ]; then
             cp -f susfs4ksu/kernel_patches/include/linux/susfs_def.h include/linux/susfs_def.h
             echo "✔ Copied include/linux/susfs_def.h"
+            
+            # FIX: Add missing <linux/cred.h> include for current_uid()
+            if ! grep -q "#include <linux/cred.h>" include/linux/susfs_def.h; then
+              sed -i '1i #include <linux/cred.h>' include/linux/susfs_def.h
+              echo "✔ Fixed: Added #include <linux/cred.h> to susfs_def.h"
+            fi
           fi
 
           echo "📦 Injecting SUSFS -> KernelSU integration files"
@@ -638,6 +650,12 @@ jobs:
           cp -f susfs4ksu/kernel_patches/include/linux/susfs.h include/linux/susfs.h
           if [ -f "susfs4ksu/kernel_patches/include/linux/susfs_def.h" ]; then
             cp -f susfs4ksu/kernel_patches/include/linux/susfs_def.h include/linux/susfs_def.h
+            
+            # FIX: Add missing <linux/cred.h> include for current_uid()
+            if ! grep -q "#include <linux/cred.h>" include/linux/susfs_def.h; then
+              sed -i '1i #include <linux/cred.h>' include/linux/susfs_def.h
+              echo "✔ Fixed: Added #include <linux/cred.h> to susfs_def.h"
+            fi
           fi
      
           echo "🔧 Adding missing symbols to fs/susfs.c..."
@@ -768,6 +786,12 @@ jobs:
           if [ -f "susfs4ksu/kernel_patches/include/linux/susfs_def.h" ]; then
             cp -f susfs4ksu/kernel_patches/include/linux/susfs_def.h include/linux/susfs_def.h
             echo "✔ Copied include/linux/susfs_def.h"
+            
+            # FIX: Add missing <linux/cred.h> include for current_uid()
+            if ! grep -q "#include <linux/cred.h>" include/linux/susfs_def.h; then
+              sed -i '1i #include <linux/cred.h>' include/linux/susfs_def.h
+              echo "✔ Fixed: Added #include <linux/cred.h> to susfs_def.h"
+            fi
           else
             echo "⚠️ susfs_def.h not found, might not be needed"
           fi
