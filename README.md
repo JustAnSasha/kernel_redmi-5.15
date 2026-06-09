@@ -13,8 +13,8 @@ This workflow is configured for specific devices. **You must modify the settings
 
 | Setting | Description | Default |
 |---------|-------------|---------|
-| **Kernel source URL** | Your kernel repository URL | `https://github.com/topnotchfreaks/kernel_msm-5.15` |
-| **Kernel branch** | Branch to build from | `codelinaro` |
+| **Kernel source URL** | Your kernel repository URL | `https://github.com/ShiningAsStar/kernel_redmi-5.15` |
+| **Kernel branch** | Branch to build from | `zepharo` |
 | **Device** | Device name for defconfig | `gki` |
 | **Custom localversion** | Add custom version suffix | (empty) |
 | **Build KSU variant** | Include KernelSU version | `true` |
@@ -36,10 +36,7 @@ Get build results sent to Telegram:
 ## 🤝 Credits
 
 - **@PhamtomK12** – Original builder
-- **@ssocozy** – Contributor  
-- **@NVG-064** – Contributor
-- **@ShirkNeko** – SUSFS integration
-- **@thewildjames** – Wild-KSU
+- **@belowzeroiq** - Kernel Source
 
 ---
 
