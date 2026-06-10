@@ -588,10 +588,13 @@ jobs:
 
           echo "📄 Installing SUSFS source files..."
           mkdir -p fs include/linux
+
           cp -f susfs4ksu/kernel_patches/fs/susfs.c fs/susfs.c
           cp -f susfs4ksu/kernel_patches/include/linux/susfs.h include/linux/susfs.h
+
           if [ -f "susfs4ksu/kernel_patches/include/linux/susfs_def.h" ]; then
             cp -f susfs4ksu/kernel_patches/include/linux/susfs_def.h include/linux/susfs_def.h
+
             if ! grep -q "#include <linux/cred.h>" include/linux/susfs_def.h; then
               sed -i '1i #include <linux/cred.h>' include/linux/susfs_def.h
             fi
@@ -599,26 +602,20 @@ jobs:
 
           SUSFS_KERNEL_PATCH="$(pwd)/susfs4ksu/kernel_patches/50_add_susfs_in_gki-android13-5.15.patch"
 
-          echo "🔧 Applying SUSFS KERNEL PATCH..."
-          if patch -p1 < "$SUSFS_KERNEL_PATCH"; then
-            echo "✅ SUSFS patch applied"
-          else
-            echo "⚠️ SUSFS patch had issues but continuing"
+          echo "🔧 Applying SUSFS kernel patch..."
+          patch -p1 < "$SUSFS_KERNEL_PATCH" || true
+
+          echo "🔍 Fixing task_mmu.c for Linux 5.15.208+"
+
+          if ! grep -q "susfs_def.h" fs/proc/task_mmu.c; then
+           sed -i '/#include <trace\/hooks\/mm.h>/a\
           fi
 
-          find . -name "*.rej" -exec echo "=== {} ===" \; -exec cat {} \;
-
-          # ❌ Больше НЕТ ручного добавления #include <linux/susfs.h> в task_mmu.c
-          # Патч сам делает это корректно.
-
-          echo "📦 Applying hide_stuff patch"
-          curl -LSs "https://raw.githubusercontent.com/nebixts/kernel_patches/main/69_hide_stuff.patch" | patch --verbose -p1 -F 3 || echo "⚠️ Hide stuff patch skipped"
-
-          sed -n '250,380p' fs/proc/task_mmu.c
+          echo "📝 Configuring RESUKISU with SUSFS..."
 
           CONFIG_FILE="arch/arm64/configs/${{ env.DEFCONFIG_NAME }}"
-          echo "📝 Configuring RESUKISU with SUSFS..."
-          cat >> "$CONFIG_FILE" << 'SUSFSCONFIG'
+
+          cat >> "$CONFIG_FILE" <<'EOF'
           CONFIG_KSU=y
           CONFIG_KPM=n
           CONFIG_KPROBES=y
@@ -640,9 +637,10 @@ jobs:
           CONFIG_KSU_SUSFS_OPEN_REDIRECT=y
           CONFIG_KSU_SUSFS_SUS_MAP=y
           CONFIG_KSU_SUSFS_SUS_SU=y
-          SUSFSCONFIG
+          EOF
 
-          rm -rf ./susfs4ksu
+          rm -rf susfs4ksu
+
           echo "✅ RESUKISU with SUSFS configured"
 
       - name: "🔧 Setup Wild-KSU with SUSFS"
