@@ -606,6 +606,8 @@ jobs:
             echo "⚠️ SUSFS patch had issues but continuing"
           fi
 
+          find . -name "*.rej" -exec echo "=== {} ===" \; -exec cat {} \;
+
           # ❌ Больше НЕТ ручного добавления #include <linux/susfs.h> в task_mmu.c
           # Патч сам делает это корректно.
 
