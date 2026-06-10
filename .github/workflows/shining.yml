@@ -612,7 +612,9 @@ jobs:
           # Патч сам делает это корректно.
 
           echo "📦 Applying hide_stuff patch"
-          curl -LSs "https://raw.githubusercontent.com/nebixts/kernel_patches/main/69_hide_stuff.patch" | patch -p1 -F 3 || echo "⚠️ Hide stuff patch skipped"
+          curl -LSs "https://raw.githubusercontent.com/nebixts/kernel_patches/main/69_hide_stuff.patch" | patch --verbose -p1 -F 3 || echo "⚠️ Hide stuff patch skipped"
+
+          sed -n '250,380p' fs/proc/task_mmu.c
 
           CONFIG_FILE="arch/arm64/configs/${{ env.DEFCONFIG_NAME }}"
           echo "📝 Configuring RESUKISU with SUSFS..."
