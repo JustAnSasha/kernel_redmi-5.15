@@ -611,7 +611,11 @@ jobs:
 
           echo "🩹 Fixing SUSFS include for 5.15.208 task_mmu.c..."
           if ! grep -q "#include <linux/susfs_def.h>" fs/proc/task_mmu.c; then
-            perl -0pi -e 's|#include <trace/hooks/mm.h>|#include <trace/hooks/mm.h>\n#if defined(CONFIG_KSU_SUSFS_SUS_KSTAT) || defined(CONFIG_KSU_SUSFS_SUS_MAP) || defined(CONFIG_KSU_SUSFS_OPEN_REDIRECT)\n#include <linux/susfs_def.h>\n#endif|' fs/proc/task_mmu.c
+            if grep -q "#include <trace/hooks/mm.h>" fs/proc/task_mmu.c; then
+              perl -0pi -e 's@#include <trace/hooks/mm.h>@#include <trace/hooks/mm.h>\n#if defined(CONFIG_KSU_SUSFS_SUS_KSTAT) || defined(CONFIG_KSU_SUSFS_SUS_MAP) || defined(CONFIG_KSU_SUSFS_OPEN_REDIRECT)\n#include <linux/susfs_def.h>\n#endif@' fs/proc/task_mmu.c
+            else
+              perl -0pi -e 's@#include <linux/pkeys.h>@#include <linux/pkeys.h>\n#if defined(CONFIG_KSU_SUSFS_SUS_KSTAT) || defined(CONFIG_KSU_SUSFS_SUS_MAP) || defined(CONFIG_KSU_SUSFS_OPEN_REDIRECT)\n#include <linux/susfs_def.h>\n#endif@' fs/proc/task_mmu.c
+            fi
           fi
 
           if [ -f fs/proc/task_mmu.c.rej ]; then
