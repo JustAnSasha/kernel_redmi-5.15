@@ -881,14 +881,16 @@ jobs:
           if [ "${{ github.event.inputs.buildKSU }}" != "noksu" ]; then
             KSU_INFO="_${{ github.event.inputs.ksuVariant }}"
           fi
+          
           ZIP_NAME="Anykernel3_${{ github.event.inputs.kernelBranch }}${KSU_INFO}_${{ github.event.inputs.optimizationLevel }}_${{ github.event.inputs.tickRate }}hz_${BUILD_TIME}.zip"
+          ART_NAME="Anykernel3_${{ github.event.inputs.kernelBranch }}${KSU_INFO}_${{ github.event.inputs.optimizationLevel }}_${{ github.event.inputs.tickRate }}hz_${BUILD_TIME}"
           
           cd AnyKernel3
           zip -r9 "../$ZIP_NAME" * -x .git/*
           cd ..
           
           echo "ZIP_PATH=$(pwd)/$ZIP_NAME" >> $GITHUB_ENV
-          echo "ZIP_NAME=$ZIP_NAME" >> $GITHUB_ENV
+          echo "ART_NAME=$ART_NAME" >> $GITHUB_ENV
 
       - name: "📤 Upload final package"
         uses: actions/upload-artifact@v4
