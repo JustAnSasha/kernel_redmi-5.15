@@ -895,7 +895,7 @@ jobs:
       - name: "📤 Upload final package"
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ env.ZIP_NAME }}
+          name: ${{ env.ART_NAME }}
           path: ${{ env.ZIP_PATH }}
           retention-days: 7
 
@@ -913,7 +913,7 @@ jobs:
 
          📦 *Build Information:*
          • Kernel: \`Linux ${{ env.KERNEL_VERSION }}\`
-         • Android: \`13-16\`
+         • Android: \`13-17\`
          • Branch: \`${{ github.event.inputs.kernelBranch }}\`
          • Device: \`${{ github.event.inputs.kernelDevice }}\`
 
@@ -925,7 +925,7 @@ jobs:
          • Local Version: \`${{ github.event.inputs.localVersion }}\`
 
          🕐 *Build Date:* $(date '+%Y-%m-%d %H:%M:%S UTC')
-         📦 *Package:* \`${{ env.ZIP_NAME }}\`"
+         📦 *Package:* \`${{ env.ART_NAME }}\`"
 
          curl -s -F document=@"${{ env.ZIP_PATH }}" \
            -F caption="$CAPTION" \
@@ -937,7 +937,7 @@ jobs:
 
          📦 *Build Information:*
          • Kernel: \`Linux ${{ env.KERNEL_VERSION }}\`
-         • Android: \`13-16\`
+         • Android: \`13-17\`
          • Branch: \`${{ github.event.inputs.kernelBranch }}\`
          • Device: \`Redmi Note 12/13 4G. Pad SE\`
 
