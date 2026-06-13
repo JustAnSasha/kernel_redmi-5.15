@@ -582,27 +582,27 @@ jobs:
         working-directory: ./${{ env.kernelDir }}/${{ env.kernelName }}
         run: |
           set -e
-          
+
           echo "📦 Cloning SUSFS4KSU..."
           git clone --depth=1 https://gitlab.com/simonpunk/susfs4ksu.git -b gki-android13-5.15
-          
+
           echo "📄 Installing SUSFS source files..."
           mkdir -p fs include/linux
-          
+
           cp -f susfs4ksu/kernel_patches/fs/susfs.c fs/susfs.c
           cp -f susfs4ksu/kernel_patches/include/linux/susfs.h include/linux/susfs.h
-          
+
           if [ -f "susfs4ksu/kernel_patches/include/linux/susfs_def.h" ]; then
             cp -f susfs4ksu/kernel_patches/include/linux/susfs_def.h include/linux/susfs_def.h
-            
+
             if ! grep -q "#include <linux/cred.h>" include/linux/susfs_def.h; then
               sed -i '1i #include <linux/cred.h>' include/linux/susfs_def.h
             fi
           fi
-          
+
           echo "🔧 Applying SUSFS kernel patch..."
           SUSFS_PATCH="susfs4ksu/kernel_patches/50_add_susfs_in_gki-android13-5.15.patch"
-          
+
           if [ -f "$SUSFS_PATCH" ]; then
             if patch -p1 --forward < "$SUSFS_PATCH"; then
               echo "✅ SUSFS kernel patch applied"
@@ -610,20 +610,26 @@ jobs:
               echo "⚠️ Patch had issues but continuing"
             fi
           fi
-          
+
           echo "🔍 Checking rejected hunks..."
           find . -name "*.rej" -exec echo "=== {} ===" \; -exec cat {} \; || true
-          
+
+          echo "🔍 Checking SUSFS include..."
+          grep -n "susfs_def.h" fs/proc/task_mmu.c || true
+
           echo "📝 Configuring RESUKISU with SUSFS..."
-          
+
           CONFIG_FILE="arch/arm64/configs/${{ env.DEFCONFIG_NAME }}"
-          
+
           cat >> "$CONFIG_FILE" << 'SUSFSCONFIG'
           CONFIG_KSU=y
+          CONFIG_KSU_MANUAL_HOOK=y
           CONFIG_KPM=n
+
           CONFIG_KPROBES=y
           CONFIG_HAVE_KPROBES=y
           CONFIG_KPROBE_EVENTS=y
+
           CONFIG_KSU_SUSFS=y
           CONFIG_KSU_SUSFS_HAS_MAGIC_MOUNT=y
           CONFIG_KSU_SUSFS_SUS_PATH=y
@@ -640,12 +646,13 @@ jobs:
           CONFIG_KSU_SUSFS_OPEN_REDIRECT=y
           CONFIG_KSU_SUSFS_SUS_MAP=y
           CONFIG_KSU_SUSFS_SUS_SU=y
+
           CONFIG_TMPFS_XATTR=y
           CONFIG_TMPFS_POSIX_ACL=y
           SUSFSCONFIG
-          
+
           rm -rf ./susfs4ksu
-          
+
           echo "🎉 RESUKISU with SUSFS configured!"
       
       - name: "🔧 Setup Wild-KSU with SUSFS"
