@@ -603,13 +603,36 @@ jobs:
           echo "🔧 Applying SUSFS kernel-side patch..."
           SUSFS_PATCH="susfs4ksu/kernel_patches/50_add_susfs_in_gki-android13-5.15.patch"
 
-          if patch -p1 --forward --dry-run < "$SUSFS_PATCH"; then
-            patch -p1 --forward < "$SUSFS_PATCH"
+          if patch -p1 --forward --batch < "$SUSFS_PATCH"; then
+            echo "✅ SUSFS kernel patch applied"
           else
-            echo "::error::SUSFS kernel patch did not apply cleanly"
-            find . -name "*.rej" -exec echo "=== {} ===" \; -exec cat {} \; || true
+            echo "⚠️ SUSFS patch had expected drift on newer 5.15; fixing task_mmu.c include manually"
+          fi
+
+          echo "🩹 Fixing SUSFS include for 5.15.208 task_mmu.c..."
+          if ! grep -q "#include <linux/susfs_def.h>" fs/proc/task_mmu.c; then
+            perl -0pi -e 's|#include <trace/hooks/mm.h>|#include <trace/hooks/mm.h>\n#if defined(CONFIG_KSU_SUSFS_SUS_KSTAT) || defined(CONFIG_KSU_SUSFS_SUS_MAP) || defined(CONFIG_KSU_SUSFS_OPEN_REDIRECT)\n#include <linux/susfs_def.h>\n#endif|' fs/proc/task_mmu.c
+          fi
+
+          if [ -f fs/proc/task_mmu.c.rej ]; then
+            if grep -q "linux/susfs_def.h" fs/proc/task_mmu.c.rej && [ "$(grep -c '^@@' fs/proc/task_mmu.c.rej)" -eq 1 ]; then
+              rm -f fs/proc/task_mmu.c.rej
+              echo "✅ Ignored known task_mmu.c include reject"
+            else
+              echo "::error::Unexpected task_mmu.c rejects"
+              cat fs/proc/task_mmu.c.rej
+              exit 1
+            fi
+          fi
+
+          if find . -name "*.rej" | grep -q .; then
+            echo "::error::Unexpected SUSFS patch rejects remain"
+            find . -name "*.rej" -exec echo "=== {} ===" \; -exec cat {} \;
             exit 1
           fi
+
+          grep -q "#include <linux/susfs_def.h>" fs/proc/task_mmu.c
+          grep -q 'obj-$(CONFIG_KSU_SUSFS) += susfs.o' fs/Makefile
 
           echo "📝 Configuring ReSukiSU SUSFS..."
           CONFIG_FILE="arch/arm64/configs/${{ env.DEFCONFIG_NAME }}"
