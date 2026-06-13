@@ -583,76 +583,70 @@ jobs:
         run: |
           set -e
 
+          echo "📦 Installing ReSukiSU..."
+          rm -rf KernelSU drivers/kernelsu
+          curl -LSs "https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/main/kernel/setup.sh" | bash -s main
+
           echo "📦 Cloning SUSFS4KSU..."
           git clone --depth=1 https://gitlab.com/simonpunk/susfs4ksu.git -b gki-android13-5.15
 
           echo "📄 Installing SUSFS source files..."
           mkdir -p fs include/linux
-
           cp -f susfs4ksu/kernel_patches/fs/susfs.c fs/susfs.c
           cp -f susfs4ksu/kernel_patches/include/linux/susfs.h include/linux/susfs.h
+          cp -f susfs4ksu/kernel_patches/include/linux/susfs_def.h include/linux/susfs_def.h
 
-          if [ -f "susfs4ksu/kernel_patches/include/linux/susfs_def.h" ]; then
-            cp -f susfs4ksu/kernel_patches/include/linux/susfs_def.h include/linux/susfs_def.h
-
-            if ! grep -q "#include <linux/cred.h>" include/linux/susfs_def.h; then
-              sed -i '1i #include <linux/cred.h>' include/linux/susfs_def.h
-            fi
+          if ! grep -q "#include <linux/cred.h>" include/linux/susfs_def.h; then
+            sed -i '1i #include <linux/cred.h>' include/linux/susfs_def.h
           fi
 
-          echo "🔧 Applying SUSFS kernel patch..."
+          echo "🔧 Applying SUSFS kernel-side patch..."
           SUSFS_PATCH="susfs4ksu/kernel_patches/50_add_susfs_in_gki-android13-5.15.patch"
 
-          if [ -f "$SUSFS_PATCH" ]; then
-            if patch -p1 --forward < "$SUSFS_PATCH"; then
-              echo "✅ SUSFS kernel patch applied"
-            else
-              echo "⚠️ Patch had issues but continuing"
-            fi
+          if patch -p1 --forward --dry-run < "$SUSFS_PATCH"; then
+            patch -p1 --forward < "$SUSFS_PATCH"
+          else
+            echo "::error::SUSFS kernel patch did not apply cleanly"
+            find . -name "*.rej" -exec echo "=== {} ===" \; -exec cat {} \; || true
+            exit 1
           fi
 
-          echo "🔍 Checking rejected hunks..."
-          find . -name "*.rej" -exec echo "=== {} ===" \; -exec cat {} \; || true
-
-          echo "🔍 Checking SUSFS include..."
-          grep -n "susfs_def.h" fs/proc/task_mmu.c || true
-
-          echo "📝 Configuring RESUKISU with SUSFS..."
-
+          echo "📝 Configuring ReSukiSU SUSFS..."
           CONFIG_FILE="arch/arm64/configs/${{ env.DEFCONFIG_NAME }}"
+
+          sed -i '/^CONFIG_KSU=/d' "$CONFIG_FILE"
+          sed -i '/^CONFIG_KSU_TRACEPOINT_HOOK=/d' "$CONFIG_FILE"
+          sed -i '/^CONFIG_KSU_MANUAL_HOOK=/d' "$CONFIG_FILE"
+          sed -i '/^CONFIG_KSU_SUSFS=/d' "$CONFIG_FILE"
+          sed -i '/^CONFIG_KSU_SUSFS_/d' "$CONFIG_FILE"
 
           cat >> "$CONFIG_FILE" << 'SUSFSCONFIG'
           CONFIG_KSU=y
-          CONFIG_KSU_MANUAL_HOOK=y
-          CONFIG_KPM=n
-
-          CONFIG_KPROBES=y
-          CONFIG_HAVE_KPROBES=y
-          CONFIG_KPROBE_EVENTS=y
-
+          # CONFIG_KSU_TRACEPOINT_HOOK is not set
+          # CONFIG_KSU_MANUAL_HOOK is not set
           CONFIG_KSU_SUSFS=y
-          CONFIG_KSU_SUSFS_HAS_MAGIC_MOUNT=y
+
           CONFIG_KSU_SUSFS_SUS_PATH=y
           CONFIG_KSU_SUSFS_SUS_MOUNT=y
-          CONFIG_KSU_SUSFS_AUTO_ADD_SUS_KSU_DEFAULT_MOUNT=y
-          CONFIG_KSU_SUSFS_AUTO_ADD_SUS_BIND_MOUNT=y
-          CONFIG_KSU_SUSFS_AUTO_ADD_TRY_UMOUNT_FOR_BIND_MOUNT=y
           CONFIG_KSU_SUSFS_SUS_KSTAT=y
-          CONFIG_KSU_SUSFS_TRY_UMOUNT=y
           CONFIG_KSU_SUSFS_SPOOF_UNAME=y
           CONFIG_KSU_SUSFS_ENABLE_LOG=y
           CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS=y
           CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG=y
           CONFIG_KSU_SUSFS_OPEN_REDIRECT=y
           CONFIG_KSU_SUSFS_SUS_MAP=y
-          CONFIG_KSU_SUSFS_SUS_SU=y
 
           CONFIG_TMPFS_XATTR=y
           CONFIG_TMPFS_POSIX_ACL=y
+          CONFIG_KALLSYMS=y
           SUSFSCONFIG
 
-          rm -rf ./susfs4ksu
+          echo "🔍 Verifying ReSukiSU integration..."
+          grep -q 'obj-$(CONFIG_KSU) += kernelsu/' drivers/Makefile
+          grep -q 'source "drivers/kernelsu/Kconfig"' drivers/Kconfig
+          grep -q 'obj-$(CONFIG_KSU_SUSFS) += susfs.o' fs/Makefile
 
+          rm -rf susfs4ksu
           echo "🎉 RESUKISU with SUSFS configured!"
       
       - name: "🔧 Setup Wild-KSU with SUSFS"
