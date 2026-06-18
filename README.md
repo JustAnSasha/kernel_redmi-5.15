@@ -14,7 +14,7 @@ This workflow is configured for specific devices. **You must modify the settings
 | Setting | Description | Default |
 |---------|-------------|---------|
 | **Kernel source URL** | Your kernel repository URL | `https://github.com/ShiningAsStar/kernel_redmi-5.15` |
-| **Kernel branch** | Branch to build from | `zepharo` |
+| **Kernel branch** | Branch to build from | `shining` |
 | **Device** | Device name for defconfig | `gki` |
 | **Custom localversion** | Add custom version suffix | (empty) |
 | **Build KSU variant** | Include KernelSU version | `true` |
