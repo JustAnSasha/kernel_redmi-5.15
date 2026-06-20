@@ -663,26 +663,7 @@ jobs:
           grep -q "#include <linux/susfs_def.h>" fs/proc/task_mmu.c
           grep -q 'obj-$(CONFIG_KSU_SUSFS) += susfs.o' fs/Makefile
 
-          echo "📦 Integrating SUSFS with KernelSU..."
-          if [ -d "susfs4ksu/kernel_patches/KernelSU/kernel" ] && [ -d "KernelSU/kernel" ]; then
-            cp -rf susfs4ksu/kernel_patches/KernelSU/kernel/* "KernelSU/kernel/"
-          fi
-
-          KSU_PATCH="susfs4ksu/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch"
-          if grep -Rqs "susfs_init();" "KernelSU/kernel"; then
-            echo "✅ SUSFS already integrated in KernelSU"
-          elif [ -f "$KSU_PATCH" ] && [ -d "KernelSU" ]; then
-            cd "KernelSU"
-            if patch -p1 --forward --fuzz=3 < "../$KSU_PATCH"; then
-              echo "✅ Applied KSU-side SUSFS patch"
-            else
-              echo "⚠️ KSU-side SUSFS patch already applied or failed; continuing"
-              find . -name "*.rej" -delete
-            fi
-            cd ..
-          else
-            echo "⚠️ Unable to find KernelSU or KSU-side SUSFS patch; continuing after source injection"
-          fi
+          rm -rf susfs4ksu
 
           echo "📝 Configuring KSU SUSFS..."
           CONFIG_FILE="arch/arm64/configs/${{ env.DEFCONFIG_NAME }}"
@@ -717,13 +698,13 @@ jobs:
           CONFIG_TMPFS_POSIX_ACL=y
           CONFIG_KALLSYMS=y
           SUSFSCONFIG
-          echo "🔍 Verifying 🔧 Setup SukiSU-Ultra with SUSFS integration..."
+
+          echo "🔍 Verifying SukiSU-Ultra with SUSFS integration..."
           grep -q 'obj-$(CONFIG_KSU) += kernelsu/' drivers/Makefile
           grep -q 'source "drivers/kernelsu/Kconfig"' drivers/Kconfig
           grep -q 'obj-$(CONFIG_KSU_SUSFS) += susfs.o' fs/Makefile
 
-          rm -rf susfs4ksu
-          echo "🎉 🔧 Setup SukiSU-Ultra with SUSFS configured!"
+          echo "🎉 SukiSU-Ultra with SUSFS configured!"
           
       - name: "🔧 Setup ReSukiSU with SUSFS"
         if: matrix.variant == 'ksu' && github.event.inputs.ksuVariant == 'resukisu'
