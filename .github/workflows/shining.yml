@@ -1,4 +1,4 @@
-name: "Build kernels (NoKSU, SukiSU, etc.)"
+name: "Build kernels (NoKSU, SukiSU, RESukisu and NEXT.)"
 
 env:
   OUT_DIR: "out"
@@ -156,10 +156,10 @@ jobs:
           echo "Disk space after cleanup:"
           df -h /
 
-      - name: "📐 Setup SWAP 16GB"
+      - name: "📐 Setup SWAP 8GB"
         uses: pierotofy/set-swap-space@master
         with:
-            swap-size-gb: 16
+            swap-size-gb: 8
 
       - name: 📐 Tune Swap
         run: |
@@ -198,7 +198,8 @@ jobs:
             echo "/swapfile created and activated (size: ${SWAP_GB}G)"
           else
             echo "No swap requested (swapSizeGB=${SWAP_GB})"
-          fi      
+          fi
+          
       - name: "🌟 Clone kernel source"
         working-directory: ./${{ env.kernelDir }}
         run: |
@@ -241,45 +242,36 @@ jobs:
             echo "✅ Spoof applied successfully. Final name: $FULL_VERSION"
           fi
           
-      - name: "📥 Initialize repo"
-        working-directory: ${{ env.WORK_DIR}}
+      - name: "📥 Initialize AOSP repo and toolchains"
+        working-directory: ${{ env.WORK_DIR }}
         run: |
+          # Initialize AOSP repo
           repo init -u https://android.googlesource.com/kernel/manifest -b common-android13-5.15-lts --depth=1
-          echo "🔄 Syncing Android kernel build environment..."
-          repo sync -c --optimized-fetch --prune --no-clone-bundle --no-tags --force-sync --fail-fast -j4
-          echo "✅ Repo sync completed"
+          repo sync --optimized-fetch --prune -j8
           
+          # Clean up existing repo and common directories
           rm -rf .repo
           rm -rf common
 
-          aria2c -x 16 -s 16 -o prebuilts/clang/host/linux-x86/clang-r584948.tar.gz "https://github.com/topnotchfreaks/clang/releases/download/v1.0.0/clang-r584948.tar.gz"
-          mkdir -p prebuilts/clang/host/linux-x86/clang-r584948
-          tar -xzf prebuilts/clang/host/linux-x86/clang-r584948.tar.gz -C prebuilts/clang/host/linux-x86/clang-r584948
-          rm -rf prebuilts/clang/host/linux-x86/clang-r584948.tar.gz
+          # Download and setup custom clang toolchain
+          aria2c -x 16 -s 16 -o prebuilts/clang/host/linux-x86/clang-r547379.tar.gz "https://github.com/topnotchfreaks/clang/releases/download/v1.0.0/clang-r547379.tar.gz"
+          mkdir -p prebuilts/clang/host/linux-x86/clang-r547379
+          tar -xzf prebuilts/clang/host/linux-x86/clang-r547379.tar.gz -C prebuilts/clang/host/linux-x86/clang-r547379
+          rm -rf prebuilts/clang/host/linux-x86/clang-r547379.tar.gz
 
+          # Remove unused clang for more space
           rm -rf prebuilts/clang/host/linux-x86/clang-3289846
           rm -rf prebuilts/clang/host/linux-x86/clang-r450784e
           rm -rf prebuilts/clang/host/linux-x86/clang-stable
           
+          # Update build config constants
           sed -i \
            -e 's/^BRANCH=.*/BRANCH=android13-5.15/' \
-           -e 's/^CLANG_VERSION=.*/CLANG_VERSION=r584948/' \
-           ${{ env.kernelDir }}/${{ env.kernelName }}/build.config.constants
+           -e 's/^CLANG_VERSION=.*/CLANG_VERSION=r547379/' \
+           ${{ env.KERNEL_LOC_DIR }}/${{ env.KERNEL_NAME }}/build.config.constants
           
-          sed -i '/^DEFCONFIG=gki_defconfig/d' ${{ env.kernelDir }}/${{ env.kernelName }}/build.config.gki
-          sed -i '$a\DEFCONFIG=${{ env.DEFCONFIG_NAME }}' ${{ env.kernelDir }}/${{ env.kernelName }}/build.config.gki
-          sed -i '/^POST_DEFCONFIG_CMDS="check_defconfig"/d' ${{ env.kernelDir }}/${{ env.kernelName }}/build.config.gki
-
-          sed -i \
-           -e '/^KMI_SYMBOL_LIST_STRICT_MODE=/d' \
-           -e '/^TRIM_NONLISTED_KMI=/d' \
-           -e '/^KMI_ENFORCED=/d' \
-           -e '$a\KMI_SYMBOL_LIST_STRICT_MODE=0' \
-           -e '$a\TRIM_NONLISTED_KMI=0' \
-           -e '$a\KMI_ENFORCED=0' \
-           -e '/^MODULES_ORDER=/d' \
-           -e '/^MODULES_LIST=/d' \
-           ${{ env.kernelDir }}/${{ env.kernelName }}/build.config.gki.aarch64
+          # Remove defconfig check (if exists)
+          sed -i '/^POST_DEFCONFIG_CMDS="check_defconfig"/d' ${{ env.KERNEL_LOC_DIR }}/${{ env.KERNEL_NAME }}/build.config.gki || true
 
       - name: "⚙️ Configure kernel optimization and tick rate"
         working-directory: ./${{ env.kernelDir }}/${{ env.kernelName }}
