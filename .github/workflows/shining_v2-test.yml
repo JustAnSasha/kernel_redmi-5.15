@@ -1,4 +1,4 @@
-name: "Build kernels (NoKSU, SukiSU, RESukisu and NEXT.)"
+name: "Build kernels (NoKSU, SukiSU, RESukisu and NEXT.) TEST"
 
 env:
   OUT_DIR: "out"
@@ -160,7 +160,7 @@ jobs:
           sudo sysctl -p
 
       - name: "🌟 Clone kernel source"
-        working-directory: ./${{ env.kernelDir }}/${{ env.kernelName }}
+        working-directory: ./${{ env.kernelDir }}
         run: |
           git clone --recursive --branch ${{ github.event.inputs.kernelBranch }} \
             ${{ github.event.inputs.kernelSourceURL }} ${{ env.kernelName }} --depth=1
