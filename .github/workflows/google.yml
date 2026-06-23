@@ -1,4 +1,4 @@
-name: "Build Google GKI"
+name: "Cook_K_CL22"
 
 env:
   OUT_DIR: "out"
@@ -28,16 +28,11 @@ on:
         required: true
         type: string
         default: "gki"
-      kernelSpoofVersion:
-        description: "Spoof kernel version (format: X.Y.Z)"
-        required: false
-        type: string
-        default: "6.1.100"
       localVersion:
         description: "Custom localversion name (e.g., -mybuild)"
         required: false
         type: string
-        default: "-Shiney"
+        default: "-NeFaRiaN-3.5-G-11062026"
       buildKSU:
         description: "Build KSU variant?"
         required: true
@@ -51,7 +46,7 @@ on:
         description: "KSU implementation (if KSU enabled)"
         required: true
         type: choice
-        default: "RESUKISU"
+        default: "NEXT"
         options:
           - "KERNELSU"
           - "NEXT"
@@ -212,7 +207,7 @@ jobs:
           rm -rf .repo
           rm -rf common
                                                                                     
-          aria2c -x 16 -s 16 -o prebuilts/clang/host/linux-x86/clang-r596125.tar.gz "https://github.com/nebixts/clang_L/releases/download/v2.0.3/clang-r596125.tar.gz"
+          aria2c -x 16 -s 16 -o prebuilts/clang/host/linux-x86/clang-r596125.tar.gz "https://github.com/nebixts/clang_L/releases/download/v2.0.4/clang-r596125.tar.gz"
           mkdir -p prebuilts/clang/host/linux-x86/clang-r596125
           tar -xzf prebuilts/clang/host/linux-x86/clang-r596125.tar.gz -C prebuilts/clang/host/linux-x86/clang-r596125
           rm -rf prebuilts/clang/host/linux-x86/clang-r596125.tar.gz
@@ -444,42 +439,6 @@ jobs:
           echo "CONFIG_BBG=y" >> arch/arm64/configs/${{ env.DEFCONFIG_NAME }}
           sed -i '/^config LSM$/,/^help$/{ /^[[:space:]]*default/ { /baseband_guard/! s/selinux/selinux,baseband_guard/ } }' security/Kconfig
 
-      - name: "🧬 Safe Kernel Version Spoof"
-        working-directory: ./${{ env.kernelDir }}/${{ env.kernelName }}
-        run: |
-          echo "🔧 Starting dynamic kernel version spoof..."
-          
-          SPOOF_VERSION="${{ github.event.inputs.kernelSpoofVersion }}"
-          LOCAL_VERSION="${{ github.event.inputs.localVersion }}"
-          FULL_VERSION="${SPOOF_VERSION}${LOCAL_VERSION}"
-          
-          if [ -z "$SPOOF_VERSION" ]; then
-            echo "⚠️ No spoof version provided. Using default source version."
-          else
-            echo "➡️ Target Full Version: $FULL_VERSION"
-
-            # 1. Hardcode KERNELVERSION including the local suffix
-            sed -i "s/^KERNELVERSION =.*/KERNELVERSION = $FULL_VERSION/" Makefile
-            
-            # 2. Silence the setlocalversion script
-            echo "" > .scmversion
-            sed -i 's/echo "\$res"/#echo "\$res"/g' scripts/setlocalversion
-            
-            # 3. Force configuration overrides in defconfig
-            CONFIG_FILE="arch/arm64/configs/${{ env.DEFCONFIG_NAME }}"
-            sed -i '/CONFIG_LOCALVERSION/d' "$CONFIG_FILE"
-            sed -i '/CONFIG_LOCALVERSION_AUTO/d' "$CONFIG_FILE"
-            echo "CONFIG_LOCALVERSION=\"$LOCAL_VERSION\"" >> "$CONFIG_FILE"
-            echo "CONFIG_LOCALVERSION_AUTO=n" >> "$CONFIG_FILE"
-
-            # 4. Update build constants for GKI
-            if [ -f "build.config.constants" ]; then
-                sed -i "s/^KERNEL_VERSION=.*/KERNEL_VERSION=$FULL_VERSION/" build.config.constants
-            fi
-
-            echo "✅ Spoof applied successfully. Final name: $FULL_VERSION"
-          fi
-
       # ====================== Begin Processing Root Kernel  base of KernelSU Stage ======================
 
       - name: "⚡ Setup KernelSU with SUSFS"
@@ -638,7 +597,7 @@ jobs:
     
           echo "📦 Installing RESUKISU..."
           curl -LSs "https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/main/kernel/setup.sh" | bash -s main
-          echo "✔ RESUKISU installed successfully"
+          echo "✔ RESUKISU installed successfully (Version: $KSU_VERSION)"
     
           echo "📦 Cloning SUSFS4KSU..."
           git clone --depth=1 https://gitlab.com/simonpunk/susfs4ksu.git -b gki-android13-5.15
@@ -651,23 +610,6 @@ jobs:
             cp -f susfs4ksu/kernel_patches/include/linux/susfs_def.h include/linux/susfs_def.h
           fi
      
-          echo "🔧 Adding missing symbols to fs/susfs.c..."
-          cat >> fs/susfs.c << 'FIXEOF'
-
-          /* === FIX: missing symbols for SUSFS + ReSukiSU === */
-          int ksu_selinux_hide_enabled = 0;
-          EXPORT_SYMBOL_GPL(ksu_selinux_hide_enabled);
-
-          void initialize_fake_status(void) { }
-          EXPORT_SYMBOL_GPL(initialize_fake_status);
-
-          void *fake_status = NULL;
-          EXPORT_SYMBOL_GPL(fake_status);
-
-          int fake_status_initialize_key = 0;
-          EXPORT_SYMBOL_GPL(fake_status_initialize_key);
-          FIXEOF
-
           # Save absolute path to patch before moving directories
           SUSFS_KERNEL_PATCH="$(pwd)/susfs4ksu/kernel_patches/50_add_susfs_in_gki-android13-5.15.patch"
 
@@ -952,7 +894,7 @@ jobs:
       - name: "📦 Create flashable ZIP"
         run: |
           BUILD_TIME=$(date +'%d-%m-%Y')
-          git clone --depth=1 https://github.com/ShiningAsStar/AnyKernel3 -b master AnyKernel3
+          git clone --depth=1 https://github.com/nebixts/AnyKernel3 -b master AnyKernel3
 
           find kernels -name "Image.*" -exec cp {} AnyKernel3/ \;
           
@@ -973,3 +915,4 @@ jobs:
           name: ${{ env.ZIP_NAME }}
           path: ${{ env.ZIP_PATH }}
           retention-days: 7
+          
