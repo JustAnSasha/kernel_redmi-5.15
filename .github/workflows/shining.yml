@@ -615,18 +615,19 @@ jobs:
           fi
 
           echo "🔧 Applying custom SUSFS kernel patch..."
-          curl -LSs "https://raw.githubusercontent.com/ShiningAsStar/extra_kernel_stuff/main/50_add_susfs_in_gki-android13-5.15.patch" | patch -p1 --forward
+          curl -LSs "https://raw.githubusercontent.com/ShiningAsStar/extra_kernel_stuff/main/50_add_susfs_in_gki-android13-5.15.patch" | patch -p1 --verbose --forward || {
+            echo "❌ Patch failed! Inspecting namespace.c..."
+            head -n 50 fs/namespace.c
+            [ -f fs/namespace.c.rej ] && cat fs/namespace.c.rej
+            exit 1
+          }
 
-          # Clean up SUSFS repo (we only needed kernel patches, not KSU integration)
           rm -rf susfs4ksu
-          
-          # Create symbolic link for drivers/kernelsu (if needed by build system)
+
           if [ ! -L "drivers/kernelsu" ]; then
             ln -sf ../KernelSU drivers/kernelsu
-            echo "✔ Created drivers/kernelsu symlink"
           fi
-          
-          # Add KSU configs with SUSFS
+
           CONFIG_FILE="arch/arm64/configs/${{ env.DEFCONFIG_NAME }}"
           cat >> "$CONFIG_FILE" << 'EOF'
           CONFIG_KSU=y
@@ -635,7 +636,7 @@ jobs:
           CONFIG_KPROBE_EVENTS=y
           CONFIG_OVERLAY_FS=y
           CONFIG_KSU_SUSFS=y
-          CONFIG_KSU_SUSFS_HAS_MAGIC_MOUNT=y
+          CONFIG_KSU_SUSFS_HAS_MAGIC_MOUNT=n
           CONFIG_KSU_SUSFS_SUS_PATH=y
           CONFIG_KSU_SUSFS_SUS_MOUNT=y
           CONFIG_KSU_SUSFS_AUTO_ADD_SUS_KSU_DEFAULT_MOUNT=y
@@ -651,10 +652,6 @@ jobs:
           CONFIG_KSU_SUSFS_SUS_SU=y
           EOF
           
-          echo "✔ ReSukiSU configs with SUSFS added"
-
-          echo "🎉 Setup ReSukiSU with SUSFS configured!"
-
       - name: "🔧 Setup KernelSU-Next with SUSFS"
         if: matrix.variant == 'ksu' && github.event.inputs.ksuVariant == 'next'
         working-directory: ./${{ env.kernelDir }}/${{ env.kernelName }}
