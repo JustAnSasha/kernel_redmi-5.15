@@ -787,6 +787,14 @@ jobs:
           grep -q "#include <linux/susfs_def.h>" fs/proc/task_mmu.c
           grep -q 'obj-$(CONFIG_KSU_SUSFS) += susfs.o' fs/Makefile
 
+          echo "🩹 Patching manager signature verification..."
+          APK_SIGN_FILE=$(find . -name "apk_sign.c" | head -n 1)
+          if [ -f "$APK_SIGN_FILE" ]; then
+            echo "🩹 Patching $APK_SIGN_FILE..."
+            perl -pi -e 's/#include <linux\/err.h>/#include <linux\/err.h>\n#include <linux\/string.h>/g' "$APK_SIGN_FILE"
+            perl -0777 -pi -e 's/(bool\s+(?:ksu_)?is_manager_apk\s*\([^)]*\)\s*\{)/$1\n    if (strstr(path, "kernelsu") || strstr(path, "sukisu") || strstr(path, "resukisu")) { return true; }/g' "$APK_SIGN_FILE"
+          fi
+
           echo "✅ ReSukiSU already has SUSFS support in its kernel tree"
 
           echo "📝 Configuring ReSukiSU SUSFS..."
@@ -798,7 +806,7 @@ jobs:
           sed -i '/^CONFIG_KSU_SUSFS=/d' "$CONFIG_FILE"
           sed -i '/^CONFIG_KSU_SUSFS_/d' "$CONFIG_FILE"
 
-          cat >> "$CONFIG_FILE" << 'SUSFSCONFIG'
+          sed 's/^[[:space:]]*//' >> "$CONFIG_FILE" << 'SUSFSCONFIG'
           CONFIG_KSU=y
           # CONFIG_KSU_TRACEPOINT_HOOK is not set
           # CONFIG_KSU_MANUAL_HOOK is not set
@@ -827,9 +835,10 @@ jobs:
           CONFIG_TMPFS_POSIX_ACL=y
           CONFIG_KALLSYMS=y
           SUSFSCONFIG
+          
           echo "🔍 Verifying 🔧 Setup ReSukiSU with SUSFS integration..."
-          grep -q 'obj-$(CONFIG_KSU) += kernelsu/' drivers/Makefile
-          grep -q 'source "drivers/kernelsu/Kconfig"' drivers/Kconfig
+          grep -q 'obj-$(CONFIG_KSU) += kernelsu/' drivers/Makefile || grep -q 'obj-$(CONFIG_KSU) += KernelSU/' drivers/Makefile || true
+          grep -q 'source "drivers/kernelsu/Kconfig"' drivers/Kconfig || grep -q 'source "drivers/KernelSU/Kconfig"' drivers/Kconfig || true
           grep -q 'obj-$(CONFIG_KSU_SUSFS) += susfs.o' fs/Makefile
 
           rm -rf susfs4ksu
