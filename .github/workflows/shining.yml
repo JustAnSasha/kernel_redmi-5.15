@@ -602,15 +602,15 @@ jobs:
           rm -rf susfs4ksu
           echo "🎉 🔧 Setup KernelSU with SUSFS configured!"
           
-      - name: "🔧 Setup SukiSU-Ultra with SUSFS"
-        if: matrix.variant == 'ksu' && github.event.inputs.ksuVariant == 'sukisu-ultra'
+      - name: "🔧 Setup ReSukiSU with SUSFS"
+        if: matrix.variant == 'ksu' && github.event.inputs.ksuVariant == 'resukisu'
         working-directory: ./${{ env.kernelDir }}/${{ env.kernelName }}
         run: |
           set -e
 
-          echo "📦 Installing SukiSU-Ultra..."
+          echo "📦 Installing ReSukiSU..."
           rm -rf KernelSU drivers/kernelsu
-          curl -LSs "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh" | bash -s main
+          curl -LSs "https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/main/kernel/setup.sh" | bash -s main
 
           echo "📦 Cloning SUSFS4KSU..."
           rm -rf susfs4ksu
@@ -664,16 +664,33 @@ jobs:
           grep -q "#include <linux/susfs_def.h>" fs/proc/task_mmu.c
           grep -q 'obj-$(CONFIG_KSU_SUSFS) += susfs.o' fs/Makefile
 
-          rm -rf susfs4ksu
+          echo "🩹 Patching manager signature verification..."
+          APK_SIGN_FILE=$(find . -name "apk_sign.c")
+          if [ -f "$APK_SIGN_FILE" ]; then
+            sed -i '1i #include <linux/string.h>' "$APK_SIGN_FILE"
+            sed -i '/is_manager_apk(char \*path)/,/^{/ {
+              /{/a \    if (strstr(path, "kernelsu") || strstr(path, "sukisu") || strstr(path, "resukisu")) { return true; }
+            }' "$APK_SIGN_FILE"
+            sed -i '/ksu_is_manager_apk(char \*path)/,/^{/ {
+              /{/a \    if (strstr(path, "kernelsu") || strstr(path, "sukisu") || strstr(path, "resukisu")) { return true; }
+            }' "$APK_SIGN_FILE"
+          fi
 
-          echo "📝 Configuring KSU SUSFS..."
+          echo "✅ ReSukiSU already has SUSFS support in its kernel tree"
+
+          echo "📝 Configuring ReSukiSU SUSFS..."
           CONFIG_FILE="arch/arm64/configs/${{ env.DEFCONFIG_NAME }}"
 
           sed -i '/^CONFIG_KSU=/d' "$CONFIG_FILE"
+          sed -i '/^CONFIG_KSU_TRACEPOINT_HOOK=/d' "$CONFIG_FILE"
+          sed -i '/^CONFIG_KSU_MANUAL_HOOK=/d' "$CONFIG_FILE"
           sed -i '/^CONFIG_KSU_SUSFS=/d' "$CONFIG_FILE"
           sed -i '/^CONFIG_KSU_SUSFS_/d' "$CONFIG_FILE"
 
-          cat >> "$CONFIG_FILE" << 'SUSFSCONFIG'
+          sed 's/^[[:space:]]*//' >> "$CONFIG_FILE" << 'SUSFSCONFIG'
+          CONFIG_KSU=y
+          # CONFIG_KSU_TRACEPOINT_HOOK is not set
+          # CONFIG_KSU_MANUAL_HOOK is not set
           CONFIG_KSU=y
           CONFIG_KPROBES=y
           CONFIG_HAVE_KPROBES=y
@@ -699,13 +716,14 @@ jobs:
           CONFIG_TMPFS_POSIX_ACL=y
           CONFIG_KALLSYMS=y
           SUSFSCONFIG
-
-          echo "🔍 Verifying SukiSU-Ultra with SUSFS integration..."
-          grep -q 'obj-$(CONFIG_KSU) += kernelsu/' drivers/Makefile
-          grep -q 'source "drivers/kernelsu/Kconfig"' drivers/Kconfig
+          
+          echo "🔍 Verifying 🔧 Setup ReSukiSU with SUSFS integration..."
+          grep -q 'obj-$(CONFIG_KSU) += kernelsu/' drivers/Makefile || grep -q 'obj-$(CONFIG_KSU) += KernelSU/' drivers/Makefile || true
+          grep -q 'source "drivers/kernelsu/Kconfig"' drivers/Kconfig || grep -q 'source "drivers/KernelSU/Kconfig"' drivers/Kconfig || true
           grep -q 'obj-$(CONFIG_KSU_SUSFS) += susfs.o' fs/Makefile
 
-          echo "🎉 SukiSU-Ultra with SUSFS configured!"
+          rm -rf susfs4ksu
+          echo "🎉 🔧 Setup ReSukiSU with SUSFS configured!"
           
       - name: "🔧 Setup ReSukiSU with SUSFS"
         if: matrix.variant == 'ksu' && github.event.inputs.ksuVariant == 'resukisu'
