@@ -614,18 +614,6 @@ jobs:
             sed -i '1i #include <linux/cred.h>' include/linux/susfs_def.h
           fi
 
-          echo "🔧 Adding missing symbols to fs/susfs.c..."
-          cat >> fs/susfs.c << 'FIXEOF'
-          int ksu_selinux_hide_enabled = 0;
-          EXPORT_SYMBOL_GPL(ksu_selinux_hide_enabled);
-          void initialize_fake_status(void) { }
-          EXPORT_SYMBOL_GPL(initialize_fake_status);
-          void *fake_status = NULL;
-          EXPORT_SYMBOL_GPL(fake_status);
-          int fake_status_initialize_key = 0;
-          EXPORT_SYMBOL_GPL(fake_status_initialize_key);
-          FIXEOF
-
           echo "🔧 Applying custom SUSFS kernel patch..."
           curl -LSs "https://raw.githubusercontent.com/ShiningAsStar/extra_kernel_stuff/main/50_add_susfs_in_gki-android13-5.15.patch" | patch -p1 --forward
 
