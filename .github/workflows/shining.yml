@@ -600,6 +600,10 @@ jobs:
           rm -rf KernelSU drivers/kernelsu
           curl -LSs "https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/main/kernel/setup.sh" | bash -s main
 
+          echo "=== RESUKISU VERSION ==="
+          git -C KernelSU rev-parse HEAD
+          git -C KernelSU log -1 --oneline
+
           if [ ! -d "KernelSU" ]; then
             echo "❌ ReSukiSU installation failed"
             exit 1
