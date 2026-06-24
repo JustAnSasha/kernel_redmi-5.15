@@ -680,6 +680,14 @@ jobs:
 
           grep "CONFIG_KSU_SUSFS" "$CONFIG_FILE" || true
 
+          echo "=== SUPERCALL CHECK ==="
+
+          grep -n "CMD_SET_APP_PROFILE" KernelSU/kernel/include/uapi/supercall.h || true
+          
+          grep -n "CMD_SET_APP_PROFILE" KernelSU/uapi/supercall.h || true
+
+          grep -n "do_set_app_profile" KernelSU/kernel/supercall/dispatch.c || true
+
           echo "🎉 ReSukiSU with SUSFS configured!"
           
       - name: "🔧 Setup KernelSU-Next with SUSFS"
