@@ -617,24 +617,19 @@ jobs:
           echo "🔧 Applying custom SUSFS kernel patch..."
           curl -LSs "https://raw.githubusercontent.com/ShiningAsStar/extra_kernel_stuff/main/50_add_susfs_in_gki-android13-5.15.patch" | patch -p1 --forward
 
-          grep -q 'obj-$(CONFIG_KSU_SUSFS) += susfs.o' fs/Makefile
-
+          # Clean up SUSFS repo (we only needed kernel patches, not KSU integration)
           rm -rf susfs4ksu
-
-          echo "📝 Configuring ReSukiSU SUSFS..."
+          
+          # Create symbolic link for drivers/kernelsu (if needed by build system)
+          if [ ! -L "drivers/kernelsu" ]; then
+            ln -sf ../KernelSU drivers/kernelsu
+            echo "✔ Created drivers/kernelsu symlink"
+          fi
+          
+          # Add KSU configs with SUSFS
           CONFIG_FILE="arch/arm64/configs/${{ env.DEFCONFIG_NAME }}"
-
-          sed -i '/^CONFIG_KSU=/d' "$CONFIG_FILE"
-          sed -i '/^CONFIG_KSU_TRACEPOINT_HOOK=/d' "$CONFIG_FILE"
-          sed -i '/^CONFIG_KSU_MANUAL_HOOK=/d' "$CONFIG_FILE"
-          sed -i '/^CONFIG_KSU_SUSFS=/d' "$CONFIG_FILE"
-          sed -i '/^CONFIG_KSU_SUSFS_/d' "$CONFIG_FILE"
-
-          cat >> "$CONFIG_FILE" << 'SUSFSCONFIG'
-          # CONFIG_KSU_TRACEPOINT_HOOK is not set
-          # CONFIG_KSU_MANUAL_HOOK is not set
+          cat >> "$CONFIG_FILE" << 'EOF'
           CONFIG_KSU=y
-          CONFIG_KPM=n
           CONFIG_KPROBES=y
           CONFIG_HAVE_KPROBES=y
           CONFIG_KPROBE_EVENTS=y
@@ -645,23 +640,18 @@ jobs:
           CONFIG_KSU_SUSFS_SUS_MOUNT=y
           CONFIG_KSU_SUSFS_AUTO_ADD_SUS_KSU_DEFAULT_MOUNT=y
           CONFIG_KSU_SUSFS_AUTO_ADD_SUS_BIND_MOUNT=y
-          CONFIG_KSU_SUSFS_AUTO_ADD_TRY_UMOUNT_FOR_BIND_MOUNT=y
           CONFIG_KSU_SUSFS_SUS_KSTAT=y
           CONFIG_KSU_SUSFS_TRY_UMOUNT=y
+          CONFIG_KSU_SUSFS_AUTO_ADD_TRY_UMOUNT_FOR_BIND_MOUNT=y
           CONFIG_KSU_SUSFS_SPOOF_UNAME=y
           CONFIG_KSU_SUSFS_ENABLE_LOG=y
           CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS=y
           CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG=y
           CONFIG_KSU_SUSFS_OPEN_REDIRECT=y
-          CONFIG_KSU_SUSFS_SUS_MAP=y
           CONFIG_KSU_SUSFS_SUS_SU=y
-          CONFIG_TMPFS_XATTR=y
-          CONFIG_TMPFS_POSIX_ACL=y
-          CONFIG_KALLSYMS=y
-          SUSFSCONFIG
-
-          grep -q 'obj-$(CONFIG_KSU) += kernelsu/' drivers/Makefile
-          grep -q 'source "drivers/kernelsu/Kconfig"' drivers/Kconfig
+          EOF
+          
+          echo "✔ ReSukiSU configs with SUSFS added"
 
           echo "🎉 Setup ReSukiSU with SUSFS configured!"
           
