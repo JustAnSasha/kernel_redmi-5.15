@@ -756,11 +756,6 @@ jobs:
           export KBUILD_BUILD_HOST=GitHub
           echo "🚀 Starting kernel compilation..."
           
-          export KERNEL_VERSION="${{ github.event.inputs.kernelSpoofVersion }}${{ github.event.inputs.localVersion }}"
-          
-          # 🔧 Disable unused-variable and unused-label errors (fixes SUSFS related warnings)
-          export KCFLAGS="-Wno-error=unused-variable -Wno-error=unused-label"
-          
           if [ "${{ github.event.inputs.LtoOptimizations }}" = "thin" ]; then
             echo "Using Thin LTO optimization"
             LTO=thin BUILD_CONFIG=${{ env.kernelDir }}/${{ env.kernelName }}/build.config.gki.aarch64 build/build.sh -j$(nproc --all)
