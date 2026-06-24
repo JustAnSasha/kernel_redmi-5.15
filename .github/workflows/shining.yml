@@ -618,7 +618,7 @@ jobs:
           curl -LSs "https://raw.githubusercontent.com/ShiningAsStar/extra_kernel_stuff/main/50_add_susfs_in_gki-android13-5.15.patch" | patch -p1 --forward
 
           # Clean up SUSFS repo (we only needed kernel patches, not KSU integration)
-          rm -rf susfs4ksu
+          # rm -rf susfs4ksu
           
           # Create symbolic link for drivers/kernelsu (if needed by build system)
           if [ ! -L "drivers/kernelsu" ]; then
@@ -650,6 +650,16 @@ jobs:
           CONFIG_KSU_SUSFS_OPEN_REDIRECT=y
           CONFIG_KSU_SUSFS_SUS_SU=y
           EOF
+
+          echo "=== SUSFS CHECK ==="
+
+          grep -n "obj-.*susfs.o" fs/Makefile || true
+
+          grep -n "susfs_get_non_sus_mnt_id_from_mnt" fs/susfs.c || true
+
+          grep -n "susfs_get_non_sus_vfsmnt_from_vfsmnt" fs/susfs.c || true
+
+          grep "CONFIG_KSU_SUSFS" "$CONFIG_FILE" || true
           
           echo "✔ ReSukiSU configs with SUSFS added"
 
