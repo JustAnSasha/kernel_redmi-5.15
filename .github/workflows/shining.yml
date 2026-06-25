@@ -640,6 +640,9 @@ jobs:
             ln -sf ../KernelSU drivers/kernelsu
             echo "✔ Created drivers/kernelsu symlink"
           fi
+
+          grep -n "susfs_get_non_sus_mnt_id_from_mnt" fs/namespace.c
+          grep -n "susfs_get_non_sus_vfsmnt_from_vfsmnt" fs/namespace.c
           
           # Add KSU configs with SUSFS
           CONFIG_FILE="arch/arm64/configs/${{ env.DEFCONFIG_NAME }}"
