@@ -641,8 +641,17 @@ jobs:
             echo "✔ Created drivers/kernelsu symlink"
           fi
 
-          grep -n "susfs_get_non_sus_mnt_id_from_mnt" fs/namespace.c
-          grep -n "susfs_get_non_sus_vfsmnt_from_vfsmnt" fs/namespace.c
+          if grep -q "susfs_get_non_sus_mnt_id_from_mnt" fs/namespace.c; then
+              echo "✔ susfs_get_non_sus_mnt_id_from_mnt found"
+          else
+              echo "❌ susfs_get_non_sus_mnt_id_from_mnt NOT found"
+          fi
+
+          if grep -q "susfs_get_non_sus_vfsmnt_from_vfsmnt" fs/namespace.c; then
+              echo "✔ susfs_get_non_sus_vfsmnt_from_vfsmnt found"
+          else
+              echo "❌ susfs_get_non_sus_vfsmnt_from_vfsmnt NOT found"
+          fi
           
           # Add KSU configs with SUSFS
           CONFIG_FILE="arch/arm64/configs/${{ env.DEFCONFIG_NAME }}"
