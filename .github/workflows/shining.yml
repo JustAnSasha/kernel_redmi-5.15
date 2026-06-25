@@ -638,8 +638,6 @@ jobs:
               echo "=== namespace reject ==="
               cat fs/namespace.c.rej
           fi
-
-          grep -A50 -B10 "fs/namespace.o" $GITHUB_WORKSPACE/build.log
           
           # Clean up the donor folder as it is no longer needed
           rm -rf susfs4ksu
