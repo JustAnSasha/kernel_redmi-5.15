@@ -605,7 +605,7 @@ jobs:
           git clone --depth=1 https://gitlab.com/simonpunk/susfs4ksu.git -b gki-android13-5.15
           
           echo "🔧 Applying CUSTOM SUSFS kernel patch..."
-          curl -LSs "https://raw.githubusercontent.com/ShiningAsStar/extra_kernel_stuff/main/50_add_susfs_in_gki-android13-5.15.patch" | patch -p1 --forward || true
+          curl -LSs "https://raw.githubusercontent.com/ShiningAsStar/extra_kernel_stuff/main/50_add_susfs_in_gki-android13-5.15.patch" | patch -p1 --forward --verbose || true
 
           echo "📄 Forcing SUSFS source injection..."
           
@@ -631,6 +631,13 @@ jobs:
           for f in fs/susfs.c include/linux/susfs.h include/linux/susfs_def.h; do
             if [ -f "$f" ]; then echo "✔ Found: $f"; else echo "❌ Missing: $f"; fi
           done
+
+          find . -name "*.rej"
+
+          if [ -f fs/namespace.c.rej ]; then
+              echo "=== namespace reject ==="
+              cat fs/namespace.c.rej
+          fi
           
           # Clean up the donor folder as it is no longer needed
           rm -rf susfs4ksu
