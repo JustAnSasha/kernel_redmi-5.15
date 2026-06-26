@@ -600,64 +600,10 @@ jobs:
           curl -LSs "https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/main/kernel/setup.sh" | bash
           echo "✔ installed successfully"
           
-          # Clone donor repository ONLY for susfs.c and susfs.h source files
-          echo "📦 Cloning SUSFS4KSU for source files..."
-          git clone --depth=1 https://gitlab.com/simonpunk/susfs4ksu.git -b gki-android13-5.15
-          
-          echo "🔧 Applying CUSTOM SUSFS kernel patch..."
-          curl -LSs "https://raw.githubusercontent.com/ShiningAsStar/extra_kernel_stuff/main/50_add_susfs_in_gki-android13-5.15.patch" | patch -p1 --forward --verbose || true
-
-          echo "📄 Forcing SUSFS source injection..."
-          
-          # Always replace fs/susfs.c
-          mkdir -p fs
-          cp -f susfs4ksu/kernel_patches/fs/susfs.c fs/susfs.c
-          echo "✔ Copied fs/susfs.c"
-          
-          # Always replace include/linux/susfs.h
-          mkdir -p include/linux
-          cp -f susfs4ksu/kernel_patches/include/linux/susfs.h include/linux/susfs.h
-          echo "✔ Copied include/linux/susfs.h"
-          
-          # Also install missing susfs_def.h
-          if [ -f susfs4ksu/kernel_patches/include/linux/susfs_def.h ]; then
-            cp -f susfs4ksu/kernel_patches/include/linux/susfs_def.h include/linux/susfs_def.h
-            echo "✔ Copied include/linux/susfs_def.h"
-          else
-            echo "⚠️ susfs_def.h not found in repo"
-          fi
-          
-          echo "🔍 Verifying SUSFS files..."
-          for f in fs/susfs.c include/linux/susfs.h include/linux/susfs_def.h; do
-            if [ -f "$f" ]; then echo "✔ Found: $f"; else echo "❌ Missing: $f"; fi
-          done
-
-          find . -name "*.rej"
-
-          if [ -f fs/namespace.c.rej ]; then
-              echo "=== namespace reject ==="
-              cat fs/namespace.c.rej
-          fi
-          
-          # Clean up the donor folder as it is no longer needed
-          rm -rf susfs4ksu
-          
           # Create symbolic link for drivers/kernelsu
           if [ ! -L "drivers/kernelsu" ]; then
             ln -sf ../KernelSU drivers/kernelsu
             echo "✔ Created drivers/kernelsu symlink"
-          fi
-
-          if grep -q "susfs_get_non_sus_mnt_id_from_mnt" fs/namespace.c; then
-              echo "✔ susfs_get_non_sus_mnt_id_from_mnt found"
-          else
-              echo "❌ susfs_get_non_sus_mnt_id_from_mnt NOT found"
-          fi
-
-          if grep -q "susfs_get_non_sus_vfsmnt_from_vfsmnt" fs/namespace.c; then
-              echo "✔ susfs_get_non_sus_vfsmnt_from_vfsmnt found"
-          else
-              echo "❌ susfs_get_non_sus_vfsmnt_from_vfsmnt NOT found"
           fi
           
           # Add KSU configs with SUSFS
