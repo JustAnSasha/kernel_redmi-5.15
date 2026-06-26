@@ -203,30 +203,17 @@ jobs:
             echo "✅ Spoof applied successfully. Final name: $FULL_VERSION"
           fi
           
-      - name: "📥 Initialize repo"
-        working-directory: ${{ env.WORK_DIR}}
+      - name: "Initialize repository and toolchain"
+        working-directory: ${{ env.WORK_DIR }}
         run: |
           repo init -u https://android.googlesource.com/kernel/manifest -b common-android13-5.15-lts --depth=1
-          echo "🔄 Syncing Android kernel build environment..."
-          repo sync -c --optimized-fetch --prune --no-clone-bundle --no-tags --force-sync --fail-fast -j4
-          echo "✅ Repo sync completed"
+          repo sync -c --optimized-fetch --prune --no-clone-bundle --no-tags --force-sync --fail-fast -j$(nproc)
           
-          rm -rf .repo
-          rm -rf common
-
-          aria2c -x 16 -s 16 -o prebuilts/clang/host/linux-x86/clang-r584948.tar.gz "https://github.com/topnotchfreaks/clang/releases/download/v1.0.0/clang-r584948.tar.gz"
-          mkdir -p prebuilts/clang/host/linux-x86/clang-r584948
-          tar -xzf prebuilts/clang/host/linux-x86/clang-r584948.tar.gz -C prebuilts/clang/host/linux-x86/clang-r584948
-          rm -rf prebuilts/clang/host/linux-x86/clang-r584948.tar.gz
-
-          rm -rf prebuilts/clang/host/linux-x86/clang-3289846
-          rm -rf prebuilts/clang/host/linux-x86/clang-r450784e
-          rm -rf prebuilts/clang/host/linux-x86/clang-stable
-          
-          sed -i \
-           -e 's/^BRANCH=.*/BRANCH=android13-5.15/' \
-           -e 's/^CLANG_VERSION=.*/CLANG_VERSION=r584948/' \
-           ${{ env.kernelDir }}/${{ env.kernelName }}/build.config.constants
+          mkdir -p clang-19
+          aria2c -x16 -s16 -j16 -o clang.tar.gz "https://github.com/ZyCromerZ/Clang/releases/download/19.0.0git-20240723-release/Clang-19.0.0git-20240723.tar.gz"
+          tar -C clang-19 -zxf clang.tar.gz
+          rm clang.tar.gz
+          echo "CLANG_PATH=$(pwd)/clang-19" >> $GITHUB_ENV
           
           sed -i '/^DEFCONFIG=gki_defconfig/d' ${{ env.kernelDir }}/${{ env.kernelName }}/build.config.gki
           sed -i '$a\DEFCONFIG=${{ env.DEFCONFIG_NAME }}' ${{ env.kernelDir }}/${{ env.kernelName }}/build.config.gki
