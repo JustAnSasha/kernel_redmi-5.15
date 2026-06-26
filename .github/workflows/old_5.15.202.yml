@@ -17,10 +17,10 @@ on:
         description: "Kernel branch"
         required: true
         type: choice
-        default: "shining"
+        default: "zepharo"
         options:
           - "google"
-          - "shining"
+          - "zepharo"
       kernelDevice:
         description: "Device (used for defconfig)"
         required: true
