@@ -122,48 +122,48 @@ jobs:
       WORK_DIR: ${{ github.workspace }}
 
     steps:
-      - name: "Prepare environment"
+      - name: "🛠️ Prepare environment"
         run: |
           mkdir -p $kernelDir
           echo "BUILD_TIME=$(date +'%Y-%m-%d')" >> $GITHUB_ENV
           sudo apt-get update -qq
           sudo apt-get install -y repo rsync aria2
 
-      - name: "Free up disk space"
+      - name: "🧹 Free up disk space"
         run: |
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc "/usr/local/share/boost" "$AGENT_TOOLSDIRECTORY"
           sudo docker image prune --all --force
           sudo docker builder prune -a -f
 
-      - name: "Configure 8GB swap"
+      - name: "💾 Configure 8GB swap"
         uses: pierotofy/set-swap-space@master
         with:
           swap-size-gb: 8
 
-      - name: "Set swappiness"
+      - name: "⚙️ Set swappiness"
         run: |
           echo "vm.swappiness=80" | sudo tee -a /etc/sysctl.conf
           sudo sysctl -p
-          
-      - name: "Clone kernel repository"
+
+      - name: "📥 Clone kernel repository"
         working-directory: ./${{ env.kernelDir }}
         run: |
           git clone --recursive --branch ${{ github.event.inputs.kernelBranch }} \
             ${{ github.event.inputs.kernelSourceURL }} ${{ env.kernelName }} --depth=1
 
-      - name: "Set custom kernel version"
+      - name: "🏷️ Set custom kernel version"
         working-directory: ./${{ env.kernelDir }}/${{ env.kernelName }}
         run: |
           SPOOF_VERSION="${{ github.event.inputs.kernelSpoofVersion }}"
           LOCAL_VERSION="${{ github.event.inputs.localVersion }}"
           FULL_VERSION="${SPOOF_VERSION}${LOCAL_VERSION}"
-          
+
           if [ -n "$SPOOF_VERSION" ]; then
             echo "Applying version override: $FULL_VERSION"
             sed -i "s/^KERNELVERSION =.*/KERNELVERSION = $FULL_VERSION/" Makefile
             echo "" > .scmversion
             sed -i 's/echo "\$res"/#echo "\$res"/g' scripts/setlocalversion
-            
+
             CONFIG_FILE="arch/arm64/configs/${{ env.DEFCONFIG_NAME }}"
             sed -i '/CONFIG_LOCALVERSION/d' "$CONFIG_FILE"
             sed -i '/CONFIG_LOCALVERSION_AUTO/d' "$CONFIG_FILE"
@@ -175,18 +175,18 @@ jobs:
             fi
           fi
 
-      - name: "Init manifest and fetch Clang"
+      - name: "🔧 Init manifest and fetch Clang"
         working-directory: ${{ env.WORK_DIR }}
         run: |
           repo init -u https://android.googlesource.com/kernel/manifest -b common-android13-5.15-lts --depth=1
           repo sync -c --optimized-fetch --prune --no-clone-bundle --no-tags --force-sync --fail-fast -j$(nproc)
-          
+
           mkdir -p clang-19
           aria2c -x16 -s16 -j16 -o clang.tar.gz "https://github.com/ZyCromerZ/Clang/releases/download/19.0.0git-20240723-release/Clang-19.0.0git-20240723.tar.gz"
           tar -C clang-19 -zxf clang.tar.gz
           rm clang.tar.gz
           echo "CLANG_PATH=$(pwd)/clang-19" >> $GITHUB_ENV
-          
+
           sed -i '/^DEFCONFIG=gki_defconfig/d' ${{ env.kernelDir }}/${{ env.kernelName }}/build.config.gki
           sed -i '$a\DEFCONFIG=${{ env.DEFCONFIG_NAME }}' ${{ env.kernelDir }}/${{ env.kernelName }}/build.config.gki
           sed -i '/^POST_DEFCONFIG_CMDS="check_defconfig"/d' ${{ env.kernelDir }}/${{ env.kernelName }}/build.config.gki
@@ -197,11 +197,11 @@ jobs:
            -e '/^MODULES_ORDER=/d' -e '/^MODULES_LIST=/d' \
            ${{ env.kernelDir }}/${{ env.kernelName }}/build.config.gki.aarch64
 
-      - name: "Patch defconfig and tickrate"
+      - name: "⚡ Patch defconfig and tickrate"
         working-directory: ./${{ env.kernelDir }}/${{ env.kernelName }}
         run: |
           CONFIG_FILE="arch/arm64/configs/${{ env.DEFCONFIG_NAME }}"
-          
+
           apply_patch() {
             local url="$1"; local file=$(basename "$url")
             curl -L -s -f -o "$file" "$url" || return 1
@@ -210,15 +210,15 @@ jobs:
 
           apply_patch "https://raw.githubusercontent.com/ShiningAsStar/extra_stuff/main/custom-tickrate-options.patch" || true
           find . -name "*.rej" -delete
-          
+
           sed -i '/CONFIG_CC_OPTIMIZE_FOR_PERFORMANCE/d; /CONFIG_CC_OPTIMIZE_FOR_PERFORMANCE_O3/d; /CONFIG_CC_OPTIMIZE_FOR_SIZE/d' "$CONFIG_FILE"
-          
+
           case "${{ github.event.inputs.optimizationLevel }}" in
             O2) echo "CONFIG_CC_OPTIMIZE_FOR_PERFORMANCE=y" >> "$CONFIG_FILE" ;;
             O3) echo "CONFIG_CC_OPTIMIZE_FOR_PERFORMANCE_O3=y" >> "$CONFIG_FILE" ;;
             Os) echo "CONFIG_CC_OPTIMIZE_FOR_SIZE=y" >> "$CONFIG_FILE" ;;
           esac
-         
+
           if [ "${{ github.event.inputs.tickRate }}" != "default" ]; then
             TICK="${{ github.event.inputs.tickRate }}"
             sed -i '/^CONFIG_HZ_/d; /^CONFIG_HZ=/d' "$CONFIG_FILE"
@@ -232,6 +232,11 @@ jobs:
             echo -e "CONFIG_LTO_CLANG=y\nCONFIG_LTO_CLANG_FULL=y" >> "$CONFIG_FILE"
           fi
 
+          # Disable debug info to keep Image size minimal
+          sed -i '/^CONFIG_DEBUG_INFO/d' "$CONFIG_FILE"
+          echo "CONFIG_DEBUG_INFO=n" >> "$CONFIG_FILE"
+          echo "CONFIG_DEBUG_INFO_NONE=y" >> "$CONFIG_FILE"
+
           cat >> "$CONFIG_FILE" << 'EOF'
           CONFIG_KALLSYMS=y
           CONFIG_TCP_CONG_ADVANCED=y
@@ -242,7 +247,7 @@ jobs:
 
           apply_patch "https://raw.githubusercontent.com/ShiningAsStar/kernel_patches/main/0001-scripts-sign-builds.patch" || true
 
-      - name: "Inject Baseband-guard"
+      - name: "🔒 Inject Baseband-guard"
         if: matrix.variant == 'ksu' && github.event.inputs.bbg == 'on'
         working-directory: ./${{ env.kernelDir }}/${{ env.kernelName }}
         run: |
@@ -250,7 +255,7 @@ jobs:
           echo "CONFIG_BBG=y" >> arch/arm64/configs/${{ env.DEFCONFIG_NAME }}
           sed -i '/^config LSM$/,/^help$/{ /^[[:space:]]*default/ { /baseband_guard/! s/selinux/selinux,baseband_guard/ } }' security/Kconfig
 
-      - name: "Setup KernelSU and SUSFS"
+      - name: "🔧 Setup KernelSU and SUSFS"
         if: matrix.variant == 'ksu'
         working-directory: ./${{ env.kernelDir }}/${{ env.kernelName }}
         run: |
@@ -318,17 +323,17 @@ jobs:
           CONFIG_TMPFS_POSIX_ACL=y
           SUSFS_EOF
 
-      - name: "Compile kernel"
+      - name: "🔨 Compile kernel"
         working-directory: ${{ env.WORK_DIR }}
         run: |
           export PATH=$CLANG_PATH/bin:$PATH
           export KBUILD_BUILD_USER=ShiningAsStar
           export KBUILD_BUILD_HOST=GitHub
-          
+
           BUILD_ARGS="CC=clang CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE=aarch64-linux-gnu-"
           LTO=${{ github.event.inputs.LtoOptimizations }} BUILD_CONFIG=${{ env.kernelDir }}/${{ env.kernelName }}/build.config.gki.aarch64 build/build.sh -j$(nproc --all) $BUILD_ARGS
 
-      - name: "Apply KPM patch"
+      - name: "🧩 Apply KPM patch"
         if: matrix.variant == 'ksu' && github.event.inputs.KPM == 'on' && (github.event.inputs.ksuVariant == 'sukisu-ultra' || github.event.inputs.ksuVariant == 'resukisu')
         working-directory: ${{ env.WORK_DIR }}/out/dist
         run: |
@@ -336,78 +341,92 @@ jobs:
           chmod +x patch_linux && ./patch_linux
           [ -f oImage ] && mv -f oImage Image
 
-      - name: "Create AnyKernel3 package"
+      - name: "📦 Prepare artifact"
+        working-directory: ${{ env.WORK_DIR }}
+        run: |
+          VARIANT_NAME="${{ matrix.variant }}"
+          if [ "${{ matrix.variant }}" == "ksu" ]; then
+            VARIANT_NAME="${{ matrix.variant }}"
+          fi
+          cp out/dist/Image Image.$VARIANT_NAME
+          echo "ARTIFACT_NAME=kernel-${VARIANT_NAME}-${{ github.event.inputs.optimizationLevel }}-${{ github.event.inputs.tickRate }}hz" >> $GITHUB_ENV
+          echo "IMAGE_NAME=Image.$VARIANT_NAME" >> $GITHUB_ENV
+
+      - name: "📦 Create AnyKernel3 package"
         working-directory: ${{ env.WORK_DIR }}
         run: |
           BUILD_TIME=$(date +'%Y-%m-%d')
+
+          # Clone AnyKernel3 and remove .git so it doesn't get zipped
           git clone --depth=1 https://github.com/ShiningAsStar/AnyKernel3 -b master AK3_Workspace
           rm -rf AK3_Workspace/.git
-          
+
           if [ ! -f out/dist/Image ]; then
             echo "::error::Kernel Image not found at out/dist/Image!"
             exit 1
           fi
-          
-          cp out/dist/Image AK3_Workspace/
-          
+
+          # Copy Image directly into AK3 folder
+          cp out/dist/Image AK3_Workspace/Image
+
           KSU_INFO=""
           if [ "${{ matrix.variant }}" = "ksu" ]; then
             KSU_INFO="_${{ github.event.inputs.ksuVariant }}"
           fi
-          
+
           ZIP_NAME="Anykernel3_${{ github.event.inputs.kernelBranch }}${KSU_INFO}_${{ github.event.inputs.optimizationLevel }}_${{ github.event.inputs.tickRate }}hz_${BUILD_TIME}.zip"
-          
+
+          # Zip contents of AK3_Workspace, NOT the folder itself — no double zip
           cd AK3_Workspace
           zip -r9 "../$ZIP_NAME" ./*
           cd ..
-          
+
           echo "FINAL_ZIP_PATH=$(pwd)/$ZIP_NAME" >> $GITHUB_ENV
           echo "FINAL_ZIP_NAME=$ZIP_NAME" >> $GITHUB_ENV
 
-      - name: "Upload build artifact"
+      - name: "📤 Upload build artifact"
         uses: actions/upload-artifact@v4
         with:
           name: ${{ env.FINAL_ZIP_NAME }}
           path: ${{ env.FINAL_ZIP_PATH }}
           retention-days: 3
 
-      - name: "Send Telegram notification"
+      - name: "📱 Send Telegram notification"
         if: always()
         run: |
-         if [[ -f "${{ env.FINAL_ZIP_PATH }}" ]]; then
-           KSU_TEXT=""
-           if [ "${{ matrix.variant }}" = "ksu" ]; then
-             KSU_TEXT="
-         • Root: \`${{ github.event.inputs.ksuVariant }}\`"
-           fi
-      
-           CAPTION="*Kernel Build Successful*
+          if [[ -f "${{ env.FINAL_ZIP_PATH }}" ]]; then
+            KSU_TEXT=""
+            if [ "${{ matrix.variant }}" = "ksu" ]; then
+              KSU_TEXT="
+          • Root: \`${{ github.event.inputs.ksuVariant }}\`"
+            fi
 
-         📦 *Build Info:*
-         • Kernel: \`Linux ${{ env.KERNEL_VERSION }}\`
-         • Branch: \`${{ github.event.inputs.kernelBranch }}\`
-         • Device: \`${{ github.event.inputs.kernelDevice }}\`
+            CAPTION="*Kernel Build Successful*
 
-         ⚙️ *Config:*
-         • Opt: \`-${{ github.event.inputs.optimizationLevel }}\`
-         • Tick: \`${{ github.event.inputs.tickRate }}Hz\`
-         • Type: \`${{ matrix.variant }}\`${KSU_TEXT}
-         • Tag: \`${{ github.event.inputs.localVersion }}\`
+          📦 *Build Info:*
+          • Kernel: \`Linux ${{ env.KERNEL_VERSION }}\`
+          • Branch: \`${{ github.event.inputs.kernelBranch }}\`
+          • Device: \`${{ github.event.inputs.kernelDevice }}\`
 
-         🕐 *Finished:* $(date '+%Y-%m-%d %H:%M:%S UTC')
-         📁 *File:* \`${{ env.FINAL_ZIP_NAME }}\`"
+          ⚙️ *Config:*
+          • Opt: \`-${{ github.event.inputs.optimizationLevel }}\`
+          • Tick: \`${{ github.event.inputs.tickRate }}Hz\`
+          • Type: \`${{ matrix.variant }}\`${KSU_TEXT}
+          • Tag: \`${{ github.event.inputs.localVersion }}\`
 
-           curl -s -F document=@"${{ env.FINAL_ZIP_PATH }}" \
-             -F caption="$CAPTION" -F parse_mode="Markdown" \
-             -F chat_id=${{ secrets.TELEGRAM_USER_ID }} \
-             "https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendDocument"
-         else
-           FAILURE_MSG="*Kernel Build Failed (${{ matrix.variant }})*
+          🕐 *Finished:* $(date '+%Y-%m-%d %H:%M:%S UTC')
+          📁 *File:* \`${{ env.FINAL_ZIP_NAME }}\`"
 
-         Check the [Actions workflow logs](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}) for details."
+            curl -s -F document=@"${{ env.FINAL_ZIP_PATH }}" \
+              -F caption="$CAPTION" -F parse_mode="Markdown" \
+              -F chat_id=${{ secrets.TELEGRAM_USER_ID }} \
+              "https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendDocument"
+          else
+            FAILURE_MSG="*Kernel Build Failed (${{ matrix.variant }})*
 
-           curl -s -X POST -d chat_id=${{ secrets.TELEGRAM_USER_ID }} \
-             -d text="$FAILURE_MSG" -d parse_mode="Markdown" \
-             "https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage"
-         fi
-         
+          Check the [Actions workflow logs](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}) for details."
+
+            curl -s -X POST -d chat_id=${{ secrets.TELEGRAM_USER_ID }} \
+              -d text="$FAILURE_MSG" -d parse_mode="Markdown" \
+              "https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage"
+          fi
