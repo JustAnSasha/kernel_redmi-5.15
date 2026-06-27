@@ -243,12 +243,11 @@ jobs:
             echo "CONFIG_LTO_CLANG_FULL=y" >> "$CONFIG_FILE"
           fi
 
-          # Strip asm symbols - safe Image size reduction
+          # Safe Image size reduction - strip asm symbols only
           echo "CONFIG_STRIP_ASM_SYMS=y" >> "$CONFIG_FILE"
 
-          # Extra configs
+          # Extra configs - no CONFIG_KALLSYMS here, GKI defconfig already has it
           cat >> "$CONFIG_FILE" << 'EOF'
-          CONFIG_KALLSYMS=y
           CONFIG_TCP_CONG_ADVANCED=y
           CONFIG_TCP_CONG_WESTWOOD=y
           CONFIG_TCP_CONG_BBR=y
@@ -382,30 +381,24 @@ jobs:
             KSU_INFO="_${{ github.event.inputs.ksuVariant }}"
           fi
 
-          ZIP_NAME="Anykernel3_${{ github.event.inputs.kernelBranch }}${KSU_INFO}_${{ github.event.inputs.optimizationLevel }}_${{ github.event.inputs.tickRate }}hz_${BUILD_TIME}.zip"
+          ZIP_NAME="Anykernel3_${{ github.event.inputs.kernelBranch }}${KSU_INFO}_${{ github.event.inputs.optimizationLevel }}_${{ github.event.inputs.tickRate }}hz_${BUILD_TIME}"
 
-          cd AK3_Workspace
-          zip -r9 "../$ZIP_NAME" ./*
-          cd ..
-
-          echo "FINAL_ZIP_PATH=$(pwd)/$ZIP_NAME" >> $GITHUB_ENV
-          echo "FINAL_ZIP_NAME=$ZIP_NAME" >> $GITHUB_ENV
-
-          mkdir -p upload_dir
-          cp "$ZIP_NAME" upload_dir/
-          echo "UPLOAD_DIR=$(pwd)/upload_dir" >> $GITHUB_ENV
+          echo "FINAL_ZIP_NAME=${ZIP_NAME}" >> $GITHUB_ENV
+          echo "AK3_DIR=$(pwd)/AK3_Workspace" >> $GITHUB_ENV
 
       - name: "📤 Upload build artifact"
         uses: actions/upload-artifact@v4
         with:
+          # Upload the folder directly - upload-artifact zips it once, result is one clean zip
           name: ${{ env.FINAL_ZIP_NAME }}
-          path: ${{ env.UPLOAD_DIR }}/${{ env.FINAL_ZIP_NAME }}
-          compression-level: 0
+          path: ${{ env.AK3_DIR }}
+          compression-level: 9
 
       - name: "📱 Send Telegram notification"
         if: always()
         run: |
-          if [[ -f "${{ env.FINAL_ZIP_PATH }}" ]]; then
+          FINAL_ZIP_PATH="${{ env.AK3_DIR }}"
+          if [[ -d "$FINAL_ZIP_PATH" ]]; then
             KSU_TEXT=""
             if [ "${{ matrix.variant }}" = "ksu" ]; then
               KSU_TEXT="
@@ -426,9 +419,14 @@ jobs:
           • Tag: \`${{ github.event.inputs.localVersion }}\`
 
           🕐 *Finished:* $(date '+%Y-%m-%d %H:%M:%S UTC')
-          📁 *File:* \`${{ env.FINAL_ZIP_NAME }}\`"
+          📁 *File:* \`${{ env.FINAL_ZIP_NAME }}.zip\`"
 
-            curl -s -F document=@"${{ env.FINAL_ZIP_PATH }}" \
+            # Send zip for Telegram - still need to zip it for sending
+            cd AK3_Workspace
+            zip -r9 "/tmp/${{ env.FINAL_ZIP_NAME }}.zip" ./*
+            cd ..
+
+            curl -s -F document=@"/tmp/${{ env.FINAL_ZIP_NAME }}.zip" \
               -F caption="$CAPTION" -F parse_mode="Markdown" \
               -F chat_id=${{ secrets.TELEGRAM_USER_ID }} \
               "https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendDocument"
