@@ -243,15 +243,26 @@ jobs:
             echo "CONFIG_LTO_CLANG_FULL=y" >> "$CONFIG_FILE"
           fi
 
-          # Safe Image size reduction - strip asm symbols only
+          # Safe Image size reduction
           echo "CONFIG_STRIP_ASM_SYMS=y" >> "$CONFIG_FILE"
 
-          # Extra configs - no CONFIG_KALLSYMS here, GKI defconfig already has it
+          # Memory / ZRAM optimizations (safe for 5.15 bengal)
           cat >> "$CONFIG_FILE" << 'EOF'
           CONFIG_TCP_CONG_ADVANCED=y
           CONFIG_TCP_CONG_WESTWOOD=y
           CONFIG_TCP_CONG_BBR=y
           CONFIG_DEFAULT_WESTWOOD=y
+          CONFIG_ZRAM=y
+          CONFIG_ZSMALLOC=y
+          CONFIG_ZSMALLOC_STAT=n
+          CONFIG_CRYPTO_LZ4=y
+          CONFIG_CRYPTO_LZ4HC=y
+          CONFIG_CRYPTO_ZSTD=y
+          CONFIG_ZRAM_DEF_COMP_LZ4=y
+          CONFIG_TMPFS_XATTR=y
+          CONFIG_TMPFS_POSIX_ACL=y
+          CONFIG_NET_SCH_FQ=y
+          CONFIG_NET_SCH_FQ_CODEL=y
           EOF
 
           apply_patch "https://raw.githubusercontent.com/ShiningAsStar/kernel_patches/main/0001-scripts-sign-builds.patch" || true
@@ -329,8 +340,6 @@ jobs:
           CONFIG_KSU_SUSFS_OPEN_REDIRECT=y
           CONFIG_KSU_SUSFS_SUS_MAP=y
           CONFIG_KSU_SUSFS_SUS_SU=y
-          CONFIG_TMPFS_XATTR=y
-          CONFIG_TMPFS_POSIX_ACL=y
           EOF
 
       - name: "🔨 Compile kernel"
@@ -353,90 +362,100 @@ jobs:
           chmod +x patch_linux && ./patch_linux
           [ -f oImage ] && mv -f oImage Image
 
-      - name: "📦 Prepare artifact"
-        working-directory: ${{ env.WORK_DIR }}
-        run: |
-          VARIANT_NAME="${{ matrix.variant }}"
-          cp out/dist/Image Image.$VARIANT_NAME
-          echo "ARTIFACT_NAME=kernel-${VARIANT_NAME}-${{ github.event.inputs.optimizationLevel }}-${{ github.event.inputs.tickRate }}hz" >> $GITHUB_ENV
-          echo "IMAGE_NAME=Image.$VARIANT_NAME" >> $GITHUB_ENV
-
-      - name: "📦 Create AnyKernel3 package"
+      - name: "📦 Prepare AnyKernel3 package"
+        id: prepare_ak3
         working-directory: ${{ env.WORK_DIR }}
         run: |
           BUILD_TIME=$(date +'%Y-%m-%d')
-
-          git clone --depth=1 https://github.com/ShiningAsStar/AnyKernel3 -b master AK3_Workspace
-          rm -rf AK3_Workspace/.git
+          VARIANT_NAME="${{ matrix.variant }}"
 
           if [ ! -f out/dist/Image ]; then
             echo "::error::Kernel Image not found at out/dist/Image!"
             exit 1
           fi
 
+          # Save named Image copy for reference
+          cp out/dist/Image Image.$VARIANT_NAME
+
+          # Clone AnyKernel3, strip git, inject Image
+          git clone --depth=1 https://github.com/ShiningAsStar/AnyKernel3 -b master AK3_Workspace
+          rm -rf AK3_Workspace/.git
           cp out/dist/Image AK3_Workspace/Image
 
           KSU_INFO=""
-          if [ "${{ matrix.variant }}" = "ksu" ]; then
+          if [ "$VARIANT_NAME" = "ksu" ]; then
             KSU_INFO="_${{ github.event.inputs.ksuVariant }}"
           fi
 
           ZIP_NAME="Anykernel3_${{ github.event.inputs.kernelBranch }}${KSU_INFO}_${{ github.event.inputs.optimizationLevel }}_${{ github.event.inputs.tickRate }}hz_${BUILD_TIME}"
 
-          echo "FINAL_ZIP_NAME=${ZIP_NAME}" >> $GITHUB_ENV
+          echo "ZIP_NAME=${ZIP_NAME}" >> $GITHUB_ENV
           echo "AK3_DIR=$(pwd)/AK3_Workspace" >> $GITHUB_ENV
+          echo "ARTIFACT_NAME=kernel-${VARIANT_NAME}-${{ github.event.inputs.optimizationLevel }}-${{ github.event.inputs.tickRate }}hz" >> $GITHUB_ENV
+          echo "IMAGE_NAME=Image.$VARIANT_NAME" >> $GITHUB_ENV
 
       - name: "📤 Upload build artifact"
         uses: actions/upload-artifact@v4
         with:
-          # Upload the folder directly - upload-artifact zips it once, result is one clean zip
-          name: ${{ env.FINAL_ZIP_NAME }}
+          # Upload folder directly — upload-artifact wraps it into one clean zip named ZIP_NAME.zip
+          name: ${{ env.ZIP_NAME }}
           path: ${{ env.AK3_DIR }}
           compression-level: 9
 
       - name: "📱 Send Telegram notification"
         if: always()
         run: |
-          FINAL_ZIP_PATH="${{ env.AK3_DIR }}"
-          if [[ -d "$FINAL_ZIP_PATH" ]]; then
-            KSU_TEXT=""
-            if [ "${{ matrix.variant }}" = "ksu" ]; then
-              KSU_TEXT="
-          • Root: \`${{ github.event.inputs.ksuVariant }}\`"
-            fi
+          KSU_TEXT=""
+          if [ "${{ matrix.variant }}" = "ksu" ]; then
+            KSU_TEXT="
+          • Root: <code>${{ github.event.inputs.ksuVariant }}</code>"
+          fi
 
-            CAPTION="*Kernel Build Successful*
+          if [[ -d "${{ env.AK3_DIR }}" ]]; then
+            # Build success — zip and send
+            cd "${{ env.AK3_DIR }}"
+            zip -r9 "/tmp/${{ env.ZIP_NAME }}.zip" ./*
+            cd -
 
-          📦 *Build Info:*
-          • Kernel: \`Linux ${{ env.KERNEL_VERSION }}\`
-          • Branch: \`${{ github.event.inputs.kernelBranch }}\`
-          • Device: \`${{ github.event.inputs.kernelDevice }}\`
+            CAPTION="✅ <b>Kernel Build Successful</b>
 
-          ⚙️ *Config:*
-          • Opt: \`-${{ github.event.inputs.optimizationLevel }}\`
-          • Tick: \`${{ github.event.inputs.tickRate }}Hz\`
-          • Type: \`${{ matrix.variant }}\`${KSU_TEXT}
-          • Tag: \`${{ github.event.inputs.localVersion }}\`
+          📦 <b>Build Info:</b>
+          • Kernel: <code>Linux ${{ env.KERNEL_VERSION }}</code>
+          • Branch: <code>${{ github.event.inputs.kernelBranch }}</code>
+          • Device: <code>${{ github.event.inputs.kernelDevice }}</code>
 
-          🕐 *Finished:* $(date '+%Y-%m-%d %H:%M:%S UTC')
-          📁 *File:* \`${{ env.FINAL_ZIP_NAME }}.zip\`"
+          ⚙️ <b>Config:</b>
+          • Optimization: <code>-${{ github.event.inputs.optimizationLevel }}</code>
+          • Tick Rate: <code>${{ github.event.inputs.tickRate }}Hz</code>
+          • Type: <code>${{ matrix.variant }}</code>${KSU_TEXT}
+          • LTO: <code>${{ github.event.inputs.LtoOptimizations }}</code>
+          • Tag: <code>${{ github.event.inputs.localVersion }}</code>
 
-            # Send zip for Telegram - still need to zip it for sending
-            cd AK3_Workspace
-            zip -r9 "/tmp/${{ env.FINAL_ZIP_NAME }}.zip" ./*
-            cd ..
+          🕐 <b>Finished:</b> $(date '+%Y-%m-%d %H:%M:%S UTC')
+          📁 <b>File:</b> <code>${{ env.ZIP_NAME }}.zip</code>"
 
-            curl -s -F document=@"/tmp/${{ env.FINAL_ZIP_NAME }}.zip" \
-              -F caption="$CAPTION" -F parse_mode="Markdown" \
+            curl -s \
+              -F document=@"/tmp/${{ env.ZIP_NAME }}.zip" \
+              -F caption="$CAPTION" \
+              -F parse_mode="HTML" \
               -F chat_id=${{ secrets.TELEGRAM_USER_ID }} \
               "https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendDocument"
           else
-            FAILURE_MSG="*Kernel Build Failed (${{ matrix.variant }})*
+            CAPTION="❌ <b>Kernel Build Failed</b>
 
-          Check the [Actions workflow logs](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}) for details."
+          📦 <b>Build Info:</b>
+          • Kernel: <code>Linux ${{ env.KERNEL_VERSION }}</code>
+          • Branch: <code>${{ github.event.inputs.kernelBranch }}</code>
+          • Type: <code>${{ matrix.variant }}</code>${KSU_TEXT}
 
-            curl -s -X POST -d chat_id=${{ secrets.TELEGRAM_USER_ID }} \
-              -d text="$FAILURE_MSG" -d parse_mode="Markdown" \
+          🕐 <b>Failed:</b> $(date '+%Y-%m-%d %H:%M:%S UTC')
+
+          🔍 <a href=\"https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}\">Check workflow logs</a>"
+
+            curl -s -X POST \
+              -d chat_id=${{ secrets.TELEGRAM_USER_ID }} \
+              -d text="$CAPTION" \
+              -d parse_mode="HTML" \
               "https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage"
           fi
           
