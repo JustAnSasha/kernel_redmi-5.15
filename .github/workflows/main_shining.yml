@@ -167,7 +167,7 @@ jobs:
             CONFIG_FILE="arch/arm64/configs/${{ env.DEFCONFIG_NAME }}"
             sed -i '/CONFIG_LOCALVERSION/d' "$CONFIG_FILE"
             sed -i '/CONFIG_LOCALVERSION_AUTO/d' "$CONFIG_FILE"
-            echo "CONFIG_LOCALVERSION=\"$LOCAL_VERSION\"" >> "$CONFIG_FILE"
+            echo 'CONFIG_LOCALVERSION="'"$LOCAL_VERSION"'"' >> "$CONFIG_FILE"
             echo "CONFIG_LOCALVERSION_AUTO=n" >> "$CONFIG_FILE"
 
             if [ -f "build.config.constants" ]; then
@@ -192,10 +192,10 @@ jobs:
           sed -i '/^POST_DEFCONFIG_CMDS="check_defconfig"/d' ${{ env.kernelDir }}/${{ env.kernelName }}/build.config.gki
 
           sed -i \
-           -e '/^KMI_SYMBOL_LIST_STRICT_MODE=/d' -e '/^TRIM_NONLISTED_KMI=/d' -e '/^KMI_ENFORCED=/d' \
-           -e '$a\KMI_SYMBOL_LIST_STRICT_MODE=0' -e '$a\TRIM_NONLISTED_KMI=0' -e '$a\KMI_ENFORCED=0' \
-           -e '/^MODULES_ORDER=/d' -e '/^MODULES_LIST=/d' \
-           ${{ env.kernelDir }}/${{ env.kernelName }}/build.config.gki.aarch64
+            -e '/^KMI_SYMBOL_LIST_STRICT_MODE=/d' -e '/^TRIM_NONLISTED_KMI=/d' -e '/^KMI_ENFORCED=/d' \
+            -e '$a\KMI_SYMBOL_LIST_STRICT_MODE=0' -e '$a\TRIM_NONLISTED_KMI=0' -e '$a\KMI_ENFORCED=0' \
+            -e '/^MODULES_ORDER=/d' -e '/^MODULES_LIST=/d' \
+            ${{ env.kernelDir }}/${{ env.kernelName }}/build.config.gki.aarch64
 
       - name: "⚡ Patch defconfig and tickrate"
         working-directory: ./${{ env.kernelDir }}/${{ env.kernelName }}
@@ -203,40 +203,50 @@ jobs:
           CONFIG_FILE="arch/arm64/configs/${{ env.DEFCONFIG_NAME }}"
 
           apply_patch() {
-            local url="$1"; local file=$(basename "$url")
+            local url="$1"
+            local file=$(basename "$url")
             curl -L -s -f -o "$file" "$url" || return 1
-            patch -p1 < "$file" || true; rm -f "$file"
+            patch -p1 < "$file" || true
+            rm -f "$file"
           }
 
           apply_patch "https://raw.githubusercontent.com/ShiningAsStar/extra_stuff/main/custom-tickrate-options.patch" || true
           find . -name "*.rej" -delete
 
-          sed -i '/CONFIG_CC_OPTIMIZE_FOR_PERFORMANCE/d; /CONFIG_CC_OPTIMIZE_FOR_PERFORMANCE_O3/d; /CONFIG_CC_OPTIMIZE_FOR_SIZE/d' "$CONFIG_FILE"
-
+          # Optimization level
+          sed -i '/CONFIG_CC_OPTIMIZE_FOR_PERFORMANCE/d' "$CONFIG_FILE"
+          sed -i '/CONFIG_CC_OPTIMIZE_FOR_PERFORMANCE_O3/d' "$CONFIG_FILE"
+          sed -i '/CONFIG_CC_OPTIMIZE_FOR_SIZE/d' "$CONFIG_FILE"
           case "${{ github.event.inputs.optimizationLevel }}" in
             O2) echo "CONFIG_CC_OPTIMIZE_FOR_PERFORMANCE=y" >> "$CONFIG_FILE" ;;
             O3) echo "CONFIG_CC_OPTIMIZE_FOR_PERFORMANCE_O3=y" >> "$CONFIG_FILE" ;;
             Os) echo "CONFIG_CC_OPTIMIZE_FOR_SIZE=y" >> "$CONFIG_FILE" ;;
           esac
 
+          # Tick rate
           if [ "${{ github.event.inputs.tickRate }}" != "default" ]; then
             TICK="${{ github.event.inputs.tickRate }}"
             sed -i '/^CONFIG_HZ_/d; /^CONFIG_HZ=/d' "$CONFIG_FILE"
-            echo -e "CONFIG_NO_HZ_IDLE=y\nCONFIG_HZ=$TICK\nCONFIG_HZ_${TICK}=y" >> "$CONFIG_FILE"
+            echo "CONFIG_NO_HZ_IDLE=y" >> "$CONFIG_FILE"
+            echo "CONFIG_HZ=$TICK" >> "$CONFIG_FILE"
+            echo "CONFIG_HZ_${TICK}=y" >> "$CONFIG_FILE"
           fi
 
+          # LTO
           sed -i '/^CONFIG_LTO_CLANG/d; /^CONFIG_THINLTO/d' "$CONFIG_FILE"
           if [ "${{ github.event.inputs.LtoOptimizations }}" = "thin" ]; then
-            echo -e "CONFIG_LTO_CLANG=y\nCONFIG_LTO_CLANG_THIN=y\nCONFIG_THINLTO=y" >> "$CONFIG_FILE"
+            echo "CONFIG_LTO_CLANG=y" >> "$CONFIG_FILE"
+            echo "CONFIG_LTO_CLANG_THIN=y" >> "$CONFIG_FILE"
+            echo "CONFIG_THINLTO=y" >> "$CONFIG_FILE"
           else
-            echo -e "CONFIG_LTO_CLANG=y\nCONFIG_LTO_CLANG_FULL=y" >> "$CONFIG_FILE"
+            echo "CONFIG_LTO_CLANG=y" >> "$CONFIG_FILE"
+            echo "CONFIG_LTO_CLANG_FULL=y" >> "$CONFIG_FILE"
           fi
 
-          # Disable debug info to keep Image size minimal
-          sed -i '/^CONFIG_DEBUG_INFO/d' "$CONFIG_FILE"
-          echo "CONFIG_DEBUG_INFO=n" >> "$CONFIG_FILE"
-          echo "CONFIG_DEBUG_INFO_NONE=y" >> "$CONFIG_FILE"
+          # Strip asm symbols - safe Image size reduction
+          echo "CONFIG_STRIP_ASM_SYMS=y" >> "$CONFIG_FILE"
 
+          # Extra configs
           cat >> "$CONFIG_FILE" << 'EOF'
           CONFIG_KALLSYMS=y
           CONFIG_TCP_CONG_ADVANCED=y
@@ -255,7 +265,7 @@ jobs:
           echo "CONFIG_BBG=y" >> arch/arm64/configs/${{ env.DEFCONFIG_NAME }}
           sed -i '/^config LSM$/,/^help$/{ /^[[:space:]]*default/ { /baseband_guard/! s/selinux/selinux,baseband_guard/ } }' security/Kconfig
 
-      - name: "🔧 Setup KernelSU and SUSFS"
+      - name: "🔑 Setup KernelSU and SUSFS"
         if: matrix.variant == 'ksu'
         working-directory: ./${{ env.kernelDir }}/${{ env.kernelName }}
         run: |
@@ -294,10 +304,11 @@ jobs:
           fi
 
           rm -rf susfs4ksu
+
           CONFIG_FILE="arch/arm64/configs/${{ env.DEFCONFIG_NAME }}"
           sed -i '/^CONFIG_KSU/d; /^CONFIG_KSU_SUSFS/d' "$CONFIG_FILE"
 
-          cat >> "$CONFIG_FILE" << 'SUSFS_EOF'
+          cat >> "$CONFIG_FILE" << 'EOF'
           CONFIG_KSU=y
           CONFIG_KPROBES=y
           CONFIG_HAVE_KPROBES=y
@@ -321,7 +332,7 @@ jobs:
           CONFIG_KSU_SUSFS_SUS_SU=y
           CONFIG_TMPFS_XATTR=y
           CONFIG_TMPFS_POSIX_ACL=y
-          SUSFS_EOF
+          EOF
 
       - name: "🔨 Compile kernel"
         working-directory: ${{ env.WORK_DIR }}
@@ -331,7 +342,9 @@ jobs:
           export KBUILD_BUILD_HOST=GitHub
 
           BUILD_ARGS="CC=clang CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE=aarch64-linux-gnu-"
-          LTO=${{ github.event.inputs.LtoOptimizations }} BUILD_CONFIG=${{ env.kernelDir }}/${{ env.kernelName }}/build.config.gki.aarch64 build/build.sh -j$(nproc --all) $BUILD_ARGS
+          LTO=${{ github.event.inputs.LtoOptimizations }} \
+            BUILD_CONFIG=${{ env.kernelDir }}/${{ env.kernelName }}/build.config.gki.aarch64 \
+            build/build.sh -j$(nproc --all) $BUILD_ARGS
 
       - name: "🧩 Apply KPM patch"
         if: matrix.variant == 'ksu' && github.event.inputs.KPM == 'on' && (github.event.inputs.ksuVariant == 'sukisu-ultra' || github.event.inputs.ksuVariant == 'resukisu')
@@ -345,9 +358,6 @@ jobs:
         working-directory: ${{ env.WORK_DIR }}
         run: |
           VARIANT_NAME="${{ matrix.variant }}"
-          if [ "${{ matrix.variant }}" == "ksu" ]; then
-            VARIANT_NAME="${{ matrix.variant }}"
-          fi
           cp out/dist/Image Image.$VARIANT_NAME
           echo "ARTIFACT_NAME=kernel-${VARIANT_NAME}-${{ github.event.inputs.optimizationLevel }}-${{ github.event.inputs.tickRate }}hz" >> $GITHUB_ENV
           echo "IMAGE_NAME=Image.$VARIANT_NAME" >> $GITHUB_ENV
@@ -357,7 +367,6 @@ jobs:
         run: |
           BUILD_TIME=$(date +'%Y-%m-%d')
 
-          # Clone AnyKernel3 and remove .git so it doesn't get zipped
           git clone --depth=1 https://github.com/ShiningAsStar/AnyKernel3 -b master AK3_Workspace
           rm -rf AK3_Workspace/.git
 
@@ -366,7 +375,6 @@ jobs:
             exit 1
           fi
 
-          # Copy Image directly into AK3 folder
           cp out/dist/Image AK3_Workspace/Image
 
           KSU_INFO=""
@@ -376,7 +384,6 @@ jobs:
 
           ZIP_NAME="Anykernel3_${{ github.event.inputs.kernelBranch }}${KSU_INFO}_${{ github.event.inputs.optimizationLevel }}_${{ github.event.inputs.tickRate }}hz_${BUILD_TIME}.zip"
 
-          # Zip contents of AK3_Workspace, NOT the folder itself — no double zip
           cd AK3_Workspace
           zip -r9 "../$ZIP_NAME" ./*
           cd ..
@@ -384,12 +391,16 @@ jobs:
           echo "FINAL_ZIP_PATH=$(pwd)/$ZIP_NAME" >> $GITHUB_ENV
           echo "FINAL_ZIP_NAME=$ZIP_NAME" >> $GITHUB_ENV
 
+          mkdir -p upload_dir
+          cp "$ZIP_NAME" upload_dir/
+          echo "UPLOAD_DIR=$(pwd)/upload_dir" >> $GITHUB_ENV
+
       - name: "📤 Upload build artifact"
         uses: actions/upload-artifact@v4
         with:
           name: ${{ env.FINAL_ZIP_NAME }}
-          path: ${{ env.FINAL_ZIP_PATH }}
-          retention-days: 3
+          path: ${{ env.UPLOAD_DIR }}/${{ env.FINAL_ZIP_NAME }}
+          compression-level: 0
 
       - name: "📱 Send Telegram notification"
         if: always()
@@ -430,3 +441,4 @@ jobs:
               -d text="$FAILURE_MSG" -d parse_mode="Markdown" \
               "https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage"
           fi
+          
