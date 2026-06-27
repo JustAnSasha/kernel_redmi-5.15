@@ -1,0 +1,413 @@
+name: "Build kernels (NoKSU, SukiSU, ReSukiSU, Next) Kinda Updated"
+
+env:
+  OUT_DIR: "out"
+  KERNEL_VERSION: "5.15"
+  ANDROID_VERSION: "13"
+
+on:
+  workflow_dispatch:
+    inputs:
+      kernelSourceURL:
+        description: "Kernel source URL"
+        required: true
+        type: string
+        default: "https://github.com/ShiningAsStar/kernel_redmi-5.15"
+      kernelBranch:
+        description: "Kernel branch"
+        required: true
+        type: choice
+        default: "shining"
+        options:
+          - "google"
+          - "shining"
+      kernelDevice:
+        description: "Device (used for defconfig)"
+        required: true
+        type: string
+        default: "gki"
+      kernelSpoofVersion:
+        description: "Spoof kernel version (format: X.Y.Z)"
+        required: false
+        type: string
+        default: "6.1.100"
+      localVersion:
+        description: "Custom localversion name (e.g., -mybuild)"
+        required: false
+        type: string
+        default: "-Shiney"
+      buildKSU:
+        description: "Build KSU variant?"
+        required: true
+        type: choice
+        default: "ksu"
+        options:
+          - "noksu"
+          - "ksu"
+          - "both"
+      ksuVariant:
+        description: "KSU implementation (if KSU enabled)"
+        required: true
+        type: choice
+        default: "sukisu-ultra"
+        options:
+          - "kernelsu"
+          - "sukisu-ultra"
+          - "resukisu"
+          - "next"
+      optimizationLevel:
+        description: "Compiler optimization level"
+        required: false
+        type: choice
+        default: "O3"
+        options:
+          - "O2"
+          - "O3"
+          - "Os"
+      tickRate:
+        description: "Kernel tick rate (Hz)"
+        required: false
+        type: choice
+        default: "250"
+        options:
+          - "default"
+          - "100"
+          - "250"
+          - "300"
+          - "500"
+          - "600"
+          - "750"
+          - "1000"
+      bbg:
+        description: "Baseband-guard Support (if KSU Enabled)"
+        required: true
+        type: choice
+        default: "on"
+        options:
+          - "on"
+          - "off"
+      LtoOptimizations:
+        description: "Choose LTO"
+        required: true
+        type: choice
+        default: "thin"
+        options:
+          - "thin"
+          - "full"
+      KPM:
+        description: "Kernel Patch Image for SukiSU/ReSukiSU (if KSU enabled)"
+        required: true
+        type: choice
+        default: "off"
+        options:
+          - "on"
+          - "off"
+
+jobs:
+  Build-Kernel:
+    name: "Build kernel (${{ matrix.variant }})"
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: ${{ fromJSON(
+          inputs.buildKSU == 'both' && '["noksu", "ksu"]' ||
+          inputs.buildKSU == 'ksu' && '["ksu"]' ||
+          '["noksu"]' ) }}
+
+    env:
+      kernelDir: common_${{ github.event.inputs.kernelDevice }}
+      kernelName: common
+      DEFCONFIG_NAME: ${{ github.event.inputs.kernelDevice }}_defconfig
+      WORK_DIR: ${{ github.workspace }}
+
+    steps:
+      - name: "Prepare environment"
+        run: |
+          mkdir -p $kernelDir
+          echo "BUILD_TIME=$(date +'%Y-%m-%d')" >> $GITHUB_ENV
+          sudo apt-get update -qq
+          sudo apt-get install -y repo rsync aria2
+
+      - name: "Free up disk space"
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc "/usr/local/share/boost" "$AGENT_TOOLSDIRECTORY"
+          sudo docker image prune --all --force
+          sudo docker builder prune -a -f
+
+      - name: "Configure 8GB swap"
+        uses: pierotofy/set-swap-space@master
+        with:
+          swap-size-gb: 8
+
+      - name: "Set swappiness"
+        run: |
+          echo "vm.swappiness=80" | sudo tee -a /etc/sysctl.conf
+          sudo sysctl -p
+          
+      - name: "Clone kernel repository"
+        working-directory: ./${{ env.kernelDir }}
+        run: |
+          git clone --recursive --branch ${{ github.event.inputs.kernelBranch }} \
+            ${{ github.event.inputs.kernelSourceURL }} ${{ env.kernelName }} --depth=1
+
+      - name: "Set custom kernel version"
+        working-directory: ./${{ env.kernelDir }}/${{ env.kernelName }}
+        run: |
+          SPOOF_VERSION="${{ github.event.inputs.kernelSpoofVersion }}"
+          LOCAL_VERSION="${{ github.event.inputs.localVersion }}"
+          FULL_VERSION="${SPOOF_VERSION}${LOCAL_VERSION}"
+          
+          if [ -n "$SPOOF_VERSION" ]; then
+            echo "Applying version override: $FULL_VERSION"
+            sed -i "s/^KERNELVERSION =.*/KERNELVERSION = $FULL_VERSION/" Makefile
+            echo "" > .scmversion
+            sed -i 's/echo "\$res"/#echo "\$res"/g' scripts/setlocalversion
+            
+            CONFIG_FILE="arch/arm64/configs/${{ env.DEFCONFIG_NAME }}"
+            sed -i '/CONFIG_LOCALVERSION/d' "$CONFIG_FILE"
+            sed -i '/CONFIG_LOCALVERSION_AUTO/d' "$CONFIG_FILE"
+            echo "CONFIG_LOCALVERSION=\"$LOCAL_VERSION\"" >> "$CONFIG_FILE"
+            echo "CONFIG_LOCALVERSION_AUTO=n" >> "$CONFIG_FILE"
+
+            if [ -f "build.config.constants" ]; then
+              sed -i "s/^KERNEL_VERSION=.*/KERNEL_VERSION=$FULL_VERSION/" build.config.constants
+            fi
+          fi
+
+      - name: "Init manifest and fetch Clang"
+        working-directory: ${{ env.WORK_DIR }}
+        run: |
+          repo init -u https://android.googlesource.com/kernel/manifest -b common-android13-5.15-lts --depth=1
+          repo sync -c --optimized-fetch --prune --no-clone-bundle --no-tags --force-sync --fail-fast -j$(nproc)
+          
+          mkdir -p clang-19
+          aria2c -x16 -s16 -j16 -o clang.tar.gz "https://github.com/ZyCromerZ/Clang/releases/download/19.0.0git-20240723-release/Clang-19.0.0git-20240723.tar.gz"
+          tar -C clang-19 -zxf clang.tar.gz
+          rm clang.tar.gz
+          echo "CLANG_PATH=$(pwd)/clang-19" >> $GITHUB_ENV
+          
+          sed -i '/^DEFCONFIG=gki_defconfig/d' ${{ env.kernelDir }}/${{ env.kernelName }}/build.config.gki
+          sed -i '$a\DEFCONFIG=${{ env.DEFCONFIG_NAME }}' ${{ env.kernelDir }}/${{ env.kernelName }}/build.config.gki
+          sed -i '/^POST_DEFCONFIG_CMDS="check_defconfig"/d' ${{ env.kernelDir }}/${{ env.kernelName }}/build.config.gki
+
+          sed -i \
+           -e '/^KMI_SYMBOL_LIST_STRICT_MODE=/d' -e '/^TRIM_NONLISTED_KMI=/d' -e '/^KMI_ENFORCED=/d' \
+           -e '$a\KMI_SYMBOL_LIST_STRICT_MODE=0' -e '$a\TRIM_NONLISTED_KMI=0' -e '$a\KMI_ENFORCED=0' \
+           -e '/^MODULES_ORDER=/d' -e '/^MODULES_LIST=/d' \
+           ${{ env.kernelDir }}/${{ env.kernelName }}/build.config.gki.aarch64
+
+      - name: "Patch defconfig and tickrate"
+        working-directory: ./${{ env.kernelDir }}/${{ env.kernelName }}
+        run: |
+          CONFIG_FILE="arch/arm64/configs/${{ env.DEFCONFIG_NAME }}"
+          
+          apply_patch() {
+            local url="$1"; local file=$(basename "$url")
+            curl -L -s -f -o "$file" "$url" || return 1
+            patch -p1 < "$file" || true; rm -f "$file"
+          }
+
+          apply_patch "https://raw.githubusercontent.com/ShiningAsStar/extra_stuff/main/custom-tickrate-options.patch" || true
+          find . -name "*.rej" -delete
+          
+          sed -i '/CONFIG_CC_OPTIMIZE_FOR_PERFORMANCE/d; /CONFIG_CC_OPTIMIZE_FOR_PERFORMANCE_O3/d; /CONFIG_CC_OPTIMIZE_FOR_SIZE/d' "$CONFIG_FILE"
+          
+          case "${{ github.event.inputs.optimizationLevel }}" in
+            O2) echo "CONFIG_CC_OPTIMIZE_FOR_PERFORMANCE=y" >> "$CONFIG_FILE" ;;
+            O3) echo "CONFIG_CC_OPTIMIZE_FOR_PERFORMANCE_O3=y" >> "$CONFIG_FILE" ;;
+            Os) echo "CONFIG_CC_OPTIMIZE_FOR_SIZE=y" >> "$CONFIG_FILE" ;;
+          esac
+         
+          if [ "${{ github.event.inputs.tickRate }}" != "default" ]; then
+            TICK="${{ github.event.inputs.tickRate }}"
+            sed -i '/^CONFIG_HZ_/d; /^CONFIG_HZ=/d' "$CONFIG_FILE"
+            echo -e "CONFIG_NO_HZ_IDLE=y\nCONFIG_HZ=$TICK\nCONFIG_HZ_${TICK}=y" >> "$CONFIG_FILE"
+          fi
+
+          sed -i '/^CONFIG_LTO_CLANG/d; /^CONFIG_THINLTO/d' "$CONFIG_FILE"
+          if [ "${{ github.event.inputs.LtoOptimizations }}" = "thin" ]; then
+            echo -e "CONFIG_LTO_CLANG=y\nCONFIG_LTO_CLANG_THIN=y\nCONFIG_THINLTO=y" >> "$CONFIG_FILE"
+          else
+            echo -e "CONFIG_LTO_CLANG=y\nCONFIG_LTO_CLANG_FULL=y" >> "$CONFIG_FILE"
+          fi
+
+          cat >> "$CONFIG_FILE" << 'EOF'
+          CONFIG_KALLSYMS=y
+          CONFIG_TCP_CONG_ADVANCED=y
+          CONFIG_TCP_CONG_WESTWOOD=y
+          CONFIG_TCP_CONG_BBR=y
+          CONFIG_DEFAULT_WESTWOOD=y
+          EOF
+
+          apply_patch "https://raw.githubusercontent.com/ShiningAsStar/kernel_patches/main/0001-scripts-sign-builds.patch" || true
+
+      - name: "Inject Baseband-guard"
+        if: matrix.variant == 'ksu' && github.event.inputs.bbg == 'on'
+        working-directory: ./${{ env.kernelDir }}/${{ env.kernelName }}
+        run: |
+          wget -qO- https://github.com/vc-teahouse/Baseband-guard/raw/main/setup.sh | bash
+          echo "CONFIG_BBG=y" >> arch/arm64/configs/${{ env.DEFCONFIG_NAME }}
+          sed -i '/^config LSM$/,/^help$/{ /^[[:space:]]*default/ { /baseband_guard/! s/selinux/selinux,baseband_guard/ } }' security/Kconfig
+
+      - name: "Setup KernelSU and SUSFS"
+        if: matrix.variant == 'ksu'
+        working-directory: ./${{ env.kernelDir }}/${{ env.kernelName }}
+        run: |
+          set -e
+          VARIANT="${{ github.event.inputs.ksuVariant }}"
+          echo "Configuring root variant: $VARIANT"
+
+          rm -rf KernelSU KernelSU-Next drivers/kernelsu
+          case "$VARIANT" in
+            kernelsu)     curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -s main ;;
+            sukisu-ultra) curl -LSs "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh" | bash -s main ;;
+            resukisu)     curl -LSs "https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/main/kernel/setup.sh" | bash ;;
+            next)         curl -LSs "https://raw.githubusercontent.com/pershoot/KernelSU-Next/dev-susfs/kernel/setup.sh" | bash -s dev-susfs ;;
+          esac
+
+          git clone --depth=1 https://gitlab.com/simonpunk/susfs4ksu.git -b gki-android13-5.15
+          curl -LSs "https://raw.githubusercontent.com/ShiningAsStar/extra_kernel_stuff/main/50_add_susfs_in_gki-android13-5.15.patch" | patch -p1 --forward || true
+
+          mkdir -p fs include/linux
+          cp -f susfs4ksu/kernel_patches/fs/susfs.c fs/susfs.c
+          cp -f susfs4ksu/kernel_patches/include/linux/susfs.h include/linux/susfs.h
+          cp -f susfs4ksu/kernel_patches/include/linux/susfs_def.h include/linux/susfs_def.h
+
+          if ! grep -q "#include <linux/cred.h>" include/linux/susfs_def.h; then
+            sed -i '1i #include <linux/cred.h>' include/linux/susfs_def.h
+          fi
+
+          if [ "$VARIANT" = "kernelsu" ]; then
+            cp -rf susfs4ksu/kernel_patches/KernelSU/kernel/* "KernelSU/kernel/"
+            patch -p1 -d KernelSU --forward --fuzz=3 < "../susfs4ksu/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch" || true
+          elif [ "$VARIANT" = "resukisu" ]; then
+            if [ ! -L "drivers/kernelsu" ]; then ln -sf ../KernelSU drivers/kernelsu; fi
+          elif [ "$VARIANT" = "next" ]; then
+            [ -d "susfs4ksu/kernel_patches/KernelSU/kernel" ] && cp -rf susfs4ksu/kernel_patches/KernelSU/kernel/* "KernelSU-Next/kernel/"
+            patch -p1 -d KernelSU-Next --forward --fuzz=3 < "../susfs4ksu/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch" || true
+          fi
+
+          rm -rf susfs4ksu
+          CONFIG_FILE="arch/arm64/configs/${{ env.DEFCONFIG_NAME }}"
+          sed -i '/^CONFIG_KSU/d; /^CONFIG_KSU_SUSFS/d' "$CONFIG_FILE"
+
+          cat >> "$CONFIG_FILE" << 'SUSFS_EOF'
+          CONFIG_KSU=y
+          CONFIG_KPROBES=y
+          CONFIG_HAVE_KPROBES=y
+          CONFIG_KPROBE_EVENTS=y
+          CONFIG_OVERLAY_FS=y
+          CONFIG_KSU_SUSFS=y
+          CONFIG_KSU_SUSFS_HAS_MAGIC_MOUNT=y
+          CONFIG_KSU_SUSFS_SUS_PATH=y
+          CONFIG_KSU_SUSFS_SUS_MOUNT=y
+          CONFIG_KSU_SUSFS_AUTO_ADD_SUS_KSU_DEFAULT_MOUNT=y
+          CONFIG_KSU_SUSFS_AUTO_ADD_SUS_BIND_MOUNT=y
+          CONFIG_KSU_SUSFS_AUTO_ADD_TRY_UMOUNT_FOR_BIND_MOUNT=y
+          CONFIG_KSU_SUSFS_SUS_KSTAT=y
+          CONFIG_KSU_SUSFS_TRY_UMOUNT=y
+          CONFIG_KSU_SUSFS_SPOOF_UNAME=y
+          CONFIG_KSU_SUSFS_ENABLE_LOG=y
+          CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS=y
+          CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG=y
+          CONFIG_KSU_SUSFS_OPEN_REDIRECT=y
+          CONFIG_KSU_SUSFS_SUS_MAP=y
+          CONFIG_KSU_SUSFS_SUS_SU=y
+          CONFIG_TMPFS_XATTR=y
+          CONFIG_TMPFS_POSIX_ACL=y
+          SUSFS_EOF
+
+      - name: "Compile kernel"
+        working-directory: ${{ env.WORK_DIR }}
+        run: |
+          export PATH=$CLANG_PATH/bin:$PATH
+          export KBUILD_BUILD_USER=ShiningAsStar
+          export KBUILD_BUILD_HOST=GitHub
+          
+          BUILD_ARGS="CC=clang CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE=aarch64-linux-gnu-"
+          LTO=${{ github.event.inputs.LtoOptimizations }} BUILD_CONFIG=${{ env.kernelDir }}/${{ env.kernelName }}/build.config.gki.aarch64 build/build.sh -j$(nproc --all) $BUILD_ARGS
+
+      - name: "Apply KPM patch"
+        if: matrix.variant == 'ksu' && github.event.inputs.KPM == 'on' && (github.event.inputs.ksuVariant == 'sukisu-ultra' || github.event.inputs.ksuVariant == 'resukisu')
+        working-directory: ${{ env.WORK_DIR }}/out/dist
+        run: |
+          curl -fL -s -o patch_linux https://github.com/SukiSU-Ultra/SukiSU_KernelPatch_patch/releases/download/0.13.0/patch_linux
+          chmod +x patch_linux && ./patch_linux
+          [ -f oImage ] && mv -f oImage Image
+
+      - name: "Create AnyKernel3 package"
+        working-directory: ${{ env.WORK_DIR }}
+        run: |
+          BUILD_TIME=$(date +'%Y-%m-%d')
+          git clone --depth=1 https://github.com/ShiningAsStar/AnyKernel3 -b master AK3_Workspace
+          rm -rf AK3_Workspace/.git
+          
+          if [ ! -f out/dist/Image ]; then
+            echo "::error::Kernel Image not found at out/dist/Image!"
+            exit 1
+          fi
+          
+          cp out/dist/Image AK3_Workspace/
+          
+          KSU_INFO=""
+          if [ "${{ matrix.variant }}" = "ksu" ]; then
+            KSU_INFO="_${{ github.event.inputs.ksuVariant }}"
+          fi
+          
+          ZIP_NAME="Anykernel3_${{ github.event.inputs.kernelBranch }}${KSU_INFO}_${{ github.event.inputs.optimizationLevel }}_${{ github.event.inputs.tickRate }}hz_${BUILD_TIME}.zip"
+          
+          cd AK3_Workspace
+          zip -r9 "../$ZIP_NAME" ./*
+          cd ..
+          
+          echo "FINAL_ZIP_PATH=$(pwd)/$ZIP_NAME" >> $GITHUB_ENV
+          echo "FINAL_ZIP_NAME=$ZIP_NAME" >> $GITHUB_ENV
+
+      - name: "Upload build artifact"
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.FINAL_ZIP_NAME }}
+          path: ${{ env.FINAL_ZIP_PATH }}
+          retention-days: 3
+
+      - name: "Send Telegram notification"
+        if: always()
+        run: |
+         if [[ -f "${{ env.FINAL_ZIP_PATH }}" ]]; then
+           KSU_TEXT=""
+           if [ "${{ matrix.variant }}" = "ksu" ]; then
+             KSU_TEXT="
+         • Root: \`${{ github.event.inputs.ksuVariant }}\`"
+           fi
+      
+           CAPTION="*Kernel Build Successful*
+
+         📦 *Build Info:*
+         • Kernel: \`Linux ${{ env.KERNEL_VERSION }}\`
+         • Branch: \`${{ github.event.inputs.kernelBranch }}\`
+         • Device: \`${{ github.event.inputs.kernelDevice }}\`
+
+         ⚙️ *Config:*
+         • Opt: \`-${{ github.event.inputs.optimizationLevel }}\`
+         • Tick: \`${{ github.event.inputs.tickRate }}Hz\`
+         • Type: \`${{ matrix.variant }}\`${KSU_TEXT}
+         • Tag: \`${{ github.event.inputs.localVersion }}\`
+
+         🕐 *Finished:* $(date '+%Y-%m-%d %H:%M:%S UTC')
+         📁 *File:* \`${{ env.FINAL_ZIP_NAME }}\`"
+
+           curl -s -F document=@"${{ env.FINAL_ZIP_PATH }}" \
+             -F caption="$CAPTION" -F parse_mode="Markdown" \
+             -F chat_id=${{ secrets.TELEGRAM_USER_ID }} \
+             "https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendDocument"
+         else
+           FAILURE_MSG="*Kernel Build Failed (${{ matrix.variant }})*
+
+         Check the [Actions workflow logs](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}) for details."
+
+           curl -s -X POST -d chat_id=${{ secrets.TELEGRAM_USER_ID }} \
+             -d text="$FAILURE_MSG" -d parse_mode="Markdown" \
+             "https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage"
+         fi
+         
