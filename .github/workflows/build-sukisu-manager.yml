@@ -1,4 +1,4 @@
-name: Build Patched Sukisu-Ultra Manager
+name: Build Patched Manager
 
 on:
   workflow_dispatch:
@@ -13,7 +13,13 @@ jobs:
       - name: Bypass Mismatch Check
         run: |
           sed -i 's/fun checkUAPIMismatch(): Boolean {/fun checkUAPIMismatch(): Boolean { return false/g' manager/app/src/main/java/com/sukisu/ultra/Natives.kt
-          sed -i 's/val showVersionMismatchWarning: Boolean/val showVersionMismatchWarning: Boolean = false \/\//g' manager/app/src/main/java/com/sukisu/ultra/ui/screen/home/HomeUiState.kt
+          
+          sed -i 's/currentManagerVersionCode != kernelVersionCode/false/g' manager/app/src/main/java/com/sukisu/ultra/ui/screen/home/HomeUiState.kt
+          
+          sed -i 's/state.showVersionMismatchWarning/false/g' manager/app/src/main/java/com/sukisu/ultra/ui/screen/home/HomeMiuix.kt 2>/dev/null || true
+          sed -i 's/state.showVersionMismatchWarning/false/g' manager/app/src/main/java/com/sukisu/ultra/ui/screen/home/HomeMaterial.kt 2>/dev/null || true
+          sed -i 's/state.showUAPIMisMatchWarning/false/g' manager/app/src/main/java/com/sukisu/ultra/ui/screen/home/HomeMiuix.kt 2>/dev/null || true
+          sed -i 's/state.showUAPIMisMatchWarning/false/g' manager/app/src/main/java/com/sukisu/ultra/ui/screen/home/HomeMaterial.kt 2>/dev/null || true
 
       - name: Setup Java 21
         uses: actions/setup-java@v4
@@ -35,3 +41,4 @@ jobs:
         with:
           name: SukiSU-Ultra-Patched
           path: manager/app/build/outputs/apk/**/*.apk
+          
