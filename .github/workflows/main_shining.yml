@@ -300,9 +300,11 @@ jobs:
           [ -d "KernelSU-Next" ] && KSU_DIR="KernelSU-Next"
           if [ -n "$KSU_DIR" ]; then
             KSU_VERSION_COUNT=$(git -C "$KSU_DIR" rev-list --count HEAD 2>/dev/null || echo "0")
-            KSUVER=$(( KSU_VERSION_COUNT + 37185 ))
+            
+            KSUVER=40950
+            
             echo "KSUVER=$KSUVER" >> $GITHUB_ENV
-            echo "✅ KSU version: $KSUVER (commits: $KSU_VERSION_COUNT)"
+            echo "✅ KSU version: $KSUVER (Fake version for Ultra Manager, real commits: $KSU_VERSION_COUNT)"
           else
             echo "KSUVER=unknown" >> $GITHUB_ENV
           fi
