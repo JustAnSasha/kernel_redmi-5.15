@@ -127,7 +127,7 @@ jobs:
           mkdir -p $kernelDir
           echo "BUILD_TIME=$(date +'%Y-%m-%d')" >> $GITHUB_ENV
           sudo apt-get update -qq
-          sudo apt-get install -y repo rsync aria2 lz4
+          sudo apt-get install -y repo rsync aria2
 
       - name: "🧹 Free up disk space"
         run: |
@@ -159,7 +159,6 @@ jobs:
           FULL_VERSION="${SPOOF_VERSION}${LOCAL_VERSION}"
 
           if [ -n "$SPOOF_VERSION" ]; then
-            echo "Applying version override: $FULL_VERSION"
             sed -i "s/^KERNELVERSION =.*/KERNELVERSION = $FULL_VERSION/" Makefile
             echo "" > .scmversion
             sed -i 's/echo "\$res"/#echo "\$res"/g' scripts/setlocalversion
@@ -213,7 +212,6 @@ jobs:
           apply_patch "https://raw.githubusercontent.com/ShiningAsStar/extra_stuff/main/custom-tickrate-options.patch" || true
           find . -name "*.rej" -delete
 
-          # Optimization level
           sed -i '/CONFIG_CC_OPTIMIZE_FOR_PERFORMANCE/d' "$CONFIG_FILE"
           sed -i '/CONFIG_CC_OPTIMIZE_FOR_PERFORMANCE_O3/d' "$CONFIG_FILE"
           sed -i '/CONFIG_CC_OPTIMIZE_FOR_SIZE/d' "$CONFIG_FILE"
@@ -223,7 +221,6 @@ jobs:
             Os) echo "CONFIG_CC_OPTIMIZE_FOR_SIZE=y" >> "$CONFIG_FILE" ;;
           esac
 
-          # Tick rate
           if [ "${{ github.event.inputs.tickRate }}" != "default" ]; then
             TICK="${{ github.event.inputs.tickRate }}"
             sed -i '/^CONFIG_HZ_/d; /^CONFIG_HZ=/d' "$CONFIG_FILE"
@@ -232,7 +229,6 @@ jobs:
             echo "CONFIG_HZ_${TICK}=y" >> "$CONFIG_FILE"
           fi
 
-          # LTO
           sed -i '/^CONFIG_LTO_CLANG/d; /^CONFIG_THINLTO/d' "$CONFIG_FILE"
           if [ "${{ github.event.inputs.LtoOptimizations }}" = "thin" ]; then
             echo "CONFIG_LTO_CLANG=y" >> "$CONFIG_FILE"
@@ -243,10 +239,9 @@ jobs:
             echo "CONFIG_LTO_CLANG_FULL=y" >> "$CONFIG_FILE"
           fi
 
-          # Safe Image size reduction
           echo "CONFIG_STRIP_ASM_SYMS=y" >> "$CONFIG_FILE"
+          echo "CONFIG_LD_DEAD_CODE_DATA_ELIMINATION=y" >> "$CONFIG_FILE"
 
-          # Networking + ZRAM/memory optimizations (safe for 5.15 bengal, inspired by doc5)
           cat >> "$CONFIG_FILE" << 'EOF'
           CONFIG_TCP_CONG_ADVANCED=y
           CONFIG_TCP_CONG_WESTWOOD=y
@@ -284,7 +279,6 @@ jobs:
         run: |
           set -e
           VARIANT="${{ github.event.inputs.ksuVariant }}"
-          echo "Configuring root variant: $VARIANT"
 
           rm -rf KernelSU KernelSU-Next drivers/kernelsu
           case "$VARIANT" in
@@ -293,21 +287,6 @@ jobs:
             resukisu)     curl -LSs "https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/main/kernel/setup.sh" | bash ;;
             next)         curl -LSs "https://raw.githubusercontent.com/pershoot/KernelSU-Next/dev-susfs/kernel/setup.sh" | bash -s dev-susfs ;;
           esac
-
-          # Get KSU version like in doc5 — works for all variants
-          KSU_DIR=""
-          [ -d "KernelSU" ] && KSU_DIR="KernelSU"
-          [ -d "KernelSU-Next" ] && KSU_DIR="KernelSU-Next"
-          if [ -n "$KSU_DIR" ]; then
-            KSU_VERSION_COUNT=$(git -C "$KSU_DIR" rev-list --count HEAD 2>/dev/null || echo "0")
-            
-            KSUVER=40950
-            
-            echo "KSUVER=$KSUVER" >> $GITHUB_ENV
-            echo "✅ KSU version: $KSUVER (Fake version for Ultra Manager, real commits: $KSU_VERSION_COUNT)"
-          else
-            echo "KSUVER=unknown" >> $GITHUB_ENV
-          fi
 
           git clone --depth=1 https://gitlab.com/simonpunk/susfs4ksu.git -b gki-android13-5.15
           curl -LSs "https://raw.githubusercontent.com/ShiningAsStar/extra_kernel_stuff/main/50_add_susfs_in_gki-android13-5.15.patch" | patch -p1 --forward || true
@@ -336,33 +315,7 @@ jobs:
           CONFIG_FILE="arch/arm64/configs/${{ env.DEFCONFIG_NAME }}"
           sed -i '/^CONFIG_KSU/d; /^CONFIG_KSU_SUSFS/d' "$CONFIG_FILE"
 
-          # KPROBES only needed for vanilla kernelsu — sukisu/resukisu/next use inline hooks
-          if [ "$VARIANT" = "kernelsu" ]; then
-            cat >> "$CONFIG_FILE" << 'EOF'
-          CONFIG_KSU=y
-          CONFIG_KPROBES=y
-          CONFIG_HAVE_KPROBES=y
-          CONFIG_KPROBE_EVENTS=y
-          CONFIG_OVERLAY_FS=y
-          CONFIG_KSU_SUSFS=y
-          CONFIG_KSU_SUSFS_HAS_MAGIC_MOUNT=y
-          CONFIG_KSU_SUSFS_SUS_PATH=y
-          CONFIG_KSU_SUSFS_SUS_MOUNT=y
-          CONFIG_KSU_SUSFS_AUTO_ADD_SUS_KSU_DEFAULT_MOUNT=y
-          CONFIG_KSU_SUSFS_AUTO_ADD_SUS_BIND_MOUNT=y
-          CONFIG_KSU_SUSFS_AUTO_ADD_TRY_UMOUNT_FOR_BIND_MOUNT=y
-          CONFIG_KSU_SUSFS_SUS_KSTAT=y
-          CONFIG_KSU_SUSFS_TRY_UMOUNT=y
-          CONFIG_KSU_SUSFS_SPOOF_UNAME=y
-          CONFIG_KSU_SUSFS_ENABLE_LOG=y
-          CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS=y
-          CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG=y
-          CONFIG_KSU_SUSFS_OPEN_REDIRECT=y
-          CONFIG_KSU_SUSFS_SUS_MAP=y
-          CONFIG_KSU_SUSFS_SUS_SU=y
-          EOF
-          else
-            cat >> "$CONFIG_FILE" << 'EOF'
+          cat >> "$CONFIG_FILE" << 'EOF'
           CONFIG_KSU=y
           CONFIG_OVERLAY_FS=y
           CONFIG_KSU_SUSFS=y
@@ -382,7 +335,6 @@ jobs:
           CONFIG_KSU_SUSFS_SUS_MAP=y
           CONFIG_KSU_SUSFS_SUS_SU=y
           EOF
-          fi
 
       - name: "🔨 Compile kernel"
         working-directory: ${{ env.WORK_DIR }}
@@ -418,29 +370,14 @@ jobs:
           git clone --depth=1 https://github.com/ShiningAsStar/AnyKernel3 -b master AK3_Workspace
           rm -rf AK3_Workspace/.git
 
-          # Compress Image with lz4 to reduce zip size, keep original name with variant suffix
-          lz4 -f -B6 --content-size out/dist/Image out/dist/Image.lz4
-          if [ -f out/dist/Image.lz4 ]; then
-            ORIG=$(wc -c < out/dist/Image)
-            COMP=$(wc -c < out/dist/Image.lz4)
-            echo "Image: ${ORIG} bytes -> lz4: ${COMP} bytes (saved $(( (ORIG - COMP) / 1024 ))KB)"
-            cp out/dist/Image.lz4 AK3_Workspace/Image.$VARIANT_NAME
-          else
-            echo "lz4 failed, using raw Image"
-            cp out/dist/Image AK3_Workspace/Image.$VARIANT_NAME
-          fi
+          cp out/dist/Image AK3_Workspace/Image.$VARIANT_NAME
 
           KSU_INFO=""
           if [ "$VARIANT_NAME" = "ksu" ]; then
             KSU_INFO="_${{ github.event.inputs.ksuVariant }}"
           fi
 
-          KSUVER_STR=""
-          if [ "$VARIANT_NAME" = "ksu" ] && [ -n "${{ env.KSUVER }}" ] && [ "${{ env.KSUVER }}" != "unknown" ]; then
-            KSUVER_STR="_v${{ env.KSUVER }}"
-          fi
-
-          ZIP_NAME="Anykernel3_${{ github.event.inputs.kernelBranch }}${KSU_INFO}${KSUVER_STR}_${{ github.event.inputs.optimizationLevel }}_${{ github.event.inputs.tickRate }}hz_${BUILD_TIME}"
+          ZIP_NAME="Anykernel3_${{ github.event.inputs.kernelBranch }}${KSU_INFO}_${{ github.event.inputs.optimizationLevel }}_${{ github.event.inputs.tickRate }}hz_${BUILD_TIME}"
 
           echo "ZIP_NAME=${ZIP_NAME}" >> $GITHUB_ENV
           echo "AK3_DIR=$(pwd)/AK3_Workspace" >> $GITHUB_ENV
@@ -450,25 +387,23 @@ jobs:
       - name: "📤 Upload build artifact"
         uses: actions/upload-artifact@v4
         with:
-          # Upload folder directly — upload-artifact zips it once into ZIP_NAME.zip
           name: ${{ env.ZIP_NAME }}
           path: ${{ env.AK3_DIR }}
           compression-level: 9
+          retention-days: 3
 
       - name: "📱 Send Telegram notification"
         if: always()
         run: |
           KSU_TEXT=""
           if [ "${{ matrix.variant }}" = "ksu" ]; then
-            KVER="${{ env.KSUVER }}"
             KSU_TEXT="
-          • Root: <code>${{ github.event.inputs.ksuVariant }}</code>
-          • KSU ver: <code>${KVER}</code>"
+          • Root: <code>${{ github.event.inputs.ksuVariant }}</code>"
           fi
 
           if [[ -d "${{ env.AK3_DIR }}" ]]; then
             TG_ZIP="/tmp/${{ env.ZIP_NAME }}.zip"
-            zip -r9 "$TG_ZIP" "${{ env.AK3_DIR }}"/*
+            (cd "${{ env.AK3_DIR }}" && zip -r9 "$TG_ZIP" ./)
 
             CAPTION="✅ <b>Kernel Build Successful!</b>
 
@@ -485,16 +420,14 @@ jobs:
           • Tag: <code>${{ github.event.inputs.localVersion }}</code>
 
           🕐 <b>Finished:</b> $(date '+%Y-%m-%d %H:%M:%S UTC')
-          📁 <b>File:</b> <code>${{ env.ZIP_NAME }}.zip</code>
-          🔗 <a href=\"https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}\">Actions Run</a>"
+          📁 <b>File:</b> <code>${{ env.ZIP_NAME }}.zip</code>"
 
-            HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+            curl -s -o /dev/null -w "Telegram HTTP: %{http_code}\n" \
               -F document=@"$TG_ZIP" \
               -F caption="$CAPTION" \
               -F parse_mode="HTML" \
               -F chat_id=${{ secrets.TELEGRAM_USER_ID }} \
-              "https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendDocument")
-            echo "Telegram sendDocument HTTP: $HTTP_CODE"
+              "https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendDocument" || true
           else
             CAPTION="❌ <b>Kernel Build Failed</b>
 
@@ -503,15 +436,13 @@ jobs:
           • Branch: <code>${{ github.event.inputs.kernelBranch }}</code>
           • Type: <code>${{ matrix.variant }}</code>${KSU_TEXT}
 
-          🕐 <b>Failed:</b> $(date '+%Y-%m-%d %H:%M:%S UTC')
-          🔍 <a href=\"https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}\">Check workflow logs</a>"
+          🕐 <b>Failed:</b> $(date '+%Y-%m-%d %H:%M:%S UTC')"
 
-            HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+            curl -s -o /dev/null -w "Telegram HTTP: %{http_code}\n" \
               -X POST \
               -d chat_id=${{ secrets.TELEGRAM_USER_ID }} \
               -d text="$CAPTION" \
               -d parse_mode="HTML" \
-              "https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage")
-            echo "Telegram sendMessage HTTP: $HTTP_CODE"
+              "https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage" || true
           fi
           
