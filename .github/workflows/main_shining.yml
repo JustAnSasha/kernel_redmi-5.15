@@ -127,7 +127,7 @@ jobs:
           mkdir -p $kernelDir
           echo "BUILD_TIME=$(date +'%Y-%m-%d')" >> $GITHUB_ENV
           sudo apt-get update -qq
-          sudo apt-get install -y repo rsync aria2
+          sudo apt-get install -y repo rsync aria2 lz4
 
       - name: "🧹 Free up disk space"
         run: |
@@ -243,15 +243,17 @@ jobs:
             echo "CONFIG_LTO_CLANG_FULL=y" >> "$CONFIG_FILE"
           fi
 
-          # Safe Image size reduction — strip asm symbols only, no debug changes
+          # Safe Image size reduction
           echo "CONFIG_STRIP_ASM_SYMS=y" >> "$CONFIG_FILE"
 
-          # Extra networking configs
+          # Networking + ZRAM/memory optimizations (safe for 5.15 bengal, inspired by doc5)
           cat >> "$CONFIG_FILE" << 'EOF'
           CONFIG_TCP_CONG_ADVANCED=y
           CONFIG_TCP_CONG_WESTWOOD=y
           CONFIG_TCP_CONG_BBR=y
           CONFIG_DEFAULT_WESTWOOD=y
+          CONFIG_NET_SCH_FQ=y
+          CONFIG_NET_SCH_FQ_CODEL=y
           CONFIG_ZRAM=y
           CONFIG_ZSMALLOC=y
           CONFIG_CRYPTO_LZ4=y
@@ -260,8 +262,10 @@ jobs:
           CONFIG_ZRAM_DEF_COMP_LZ4=y
           CONFIG_TMPFS_XATTR=y
           CONFIG_TMPFS_POSIX_ACL=y
-          CONFIG_NET_SCH_FQ=y
-          CONFIG_NET_SCH_FQ_CODEL=y
+          CONFIG_PM_WAKELOCKS=y
+          CONFIG_PM_WAKELOCKS_GC=y
+          CONFIG_PM_WAKELOCKS_LIMIT=100
+          CONFIG_WIREGUARD=y
           EOF
 
           apply_patch "https://raw.githubusercontent.com/ShiningAsStar/kernel_patches/main/0001-scripts-sign-builds.patch" || true
@@ -290,6 +294,19 @@ jobs:
             next)         curl -LSs "https://raw.githubusercontent.com/pershoot/KernelSU-Next/dev-susfs/kernel/setup.sh" | bash -s dev-susfs ;;
           esac
 
+          # Get KSU version like in doc5 — works for all variants
+          KSU_DIR=""
+          [ -d "KernelSU" ] && KSU_DIR="KernelSU"
+          [ -d "KernelSU-Next" ] && KSU_DIR="KernelSU-Next"
+          if [ -n "$KSU_DIR" ]; then
+            KSU_VERSION_COUNT=$(git -C "$KSU_DIR" rev-list --count HEAD 2>/dev/null || echo "0")
+            KSUVER=$(( KSU_VERSION_COUNT + 37185 ))
+            echo "KSUVER=$KSUVER" >> $GITHUB_ENV
+            echo "✅ KSU version: $KSUVER (commits: $KSU_VERSION_COUNT)"
+          else
+            echo "KSUVER=unknown" >> $GITHUB_ENV
+          fi
+
           git clone --depth=1 https://gitlab.com/simonpunk/susfs4ksu.git -b gki-android13-5.15
           curl -LSs "https://raw.githubusercontent.com/ShiningAsStar/extra_kernel_stuff/main/50_add_susfs_in_gki-android13-5.15.patch" | patch -p1 --forward || true
 
@@ -317,8 +334,7 @@ jobs:
           CONFIG_FILE="arch/arm64/configs/${{ env.DEFCONFIG_NAME }}"
           sed -i '/^CONFIG_KSU/d; /^CONFIG_KSU_SUSFS/d' "$CONFIG_FILE"
 
-          # KPROBES only needed for vanilla kernelsu (uses kprobe hooks)
-          # sukisu-ultra / resukisu / next use inline hooks — no kprobes needed = smaller Image
+          # KPROBES only needed for vanilla kernelsu — sukisu/resukisu/next use inline hooks
           if [ "$VARIANT" = "kernelsu" ]; then
             cat >> "$CONFIG_FILE" << 'EOF'
           CONFIG_KSU=y
@@ -342,8 +358,6 @@ jobs:
           CONFIG_KSU_SUSFS_OPEN_REDIRECT=y
           CONFIG_KSU_SUSFS_SUS_MAP=y
           CONFIG_KSU_SUSFS_SUS_SU=y
-          CONFIG_TMPFS_XATTR=y
-          CONFIG_TMPFS_POSIX_ACL=y
           EOF
           else
             cat >> "$CONFIG_FILE" << 'EOF'
@@ -365,8 +379,6 @@ jobs:
           CONFIG_KSU_SUSFS_OPEN_REDIRECT=y
           CONFIG_KSU_SUSFS_SUS_MAP=y
           CONFIG_KSU_SUSFS_SUS_SU=y
-          CONFIG_TMPFS_XATTR=y
-          CONFIG_TMPFS_POSIX_ACL=y
           EOF
           fi
 
@@ -404,15 +416,29 @@ jobs:
           git clone --depth=1 https://github.com/ShiningAsStar/AnyKernel3 -b master AK3_Workspace
           rm -rf AK3_Workspace/.git
 
-          # Copy Image with variant name — this is what ends up inside the zip
-          cp out/dist/Image AK3_Workspace/Image.$VARIANT_NAME
+          # Compress Image with lz4 to reduce zip size, keep original name with variant suffix
+          lz4 -B6 --content-size out/dist/Image out/dist/Image.lz4
+          if [ -f out/dist/Image.lz4 ]; then
+            ORIG=$(wc -c < out/dist/Image)
+            COMP=$(wc -c < out/dist/Image.lz4)
+            echo "Image: ${ORIG} bytes -> lz4: ${COMP} bytes (saved $(( (ORIG - COMP) / 1024 ))KB)"
+            cp out/dist/Image.lz4 AK3_Workspace/Image.$VARIANT_NAME
+          else
+            echo "lz4 failed, using raw Image"
+            cp out/dist/Image AK3_Workspace/Image.$VARIANT_NAME
+          fi
 
           KSU_INFO=""
           if [ "$VARIANT_NAME" = "ksu" ]; then
             KSU_INFO="_${{ github.event.inputs.ksuVariant }}"
           fi
 
-          ZIP_NAME="Anykernel3_${{ github.event.inputs.kernelBranch }}${KSU_INFO}_${{ github.event.inputs.optimizationLevel }}_${{ github.event.inputs.tickRate }}hz_${BUILD_TIME}"
+          KSUVER_STR=""
+          if [ "$VARIANT_NAME" = "ksu" ] && [ -n "${{ env.KSUVER }}" ] && [ "${{ env.KSUVER }}" != "unknown" ]; then
+            KSUVER_STR="_v${{ env.KSUVER }}"
+          fi
+
+          ZIP_NAME="Anykernel3_${{ github.event.inputs.kernelBranch }}${KSU_INFO}${KSUVER_STR}_${{ github.event.inputs.optimizationLevel }}_${{ github.event.inputs.tickRate }}hz_${BUILD_TIME}"
 
           echo "ZIP_NAME=${ZIP_NAME}" >> $GITHUB_ENV
           echo "AK3_DIR=$(pwd)/AK3_Workspace" >> $GITHUB_ENV
@@ -432,16 +458,17 @@ jobs:
         run: |
           KSU_TEXT=""
           if [ "${{ matrix.variant }}" = "ksu" ]; then
+            KVER="${{ env.KSUVER }}"
             KSU_TEXT="
-          • Root: <code>${{ github.event.inputs.ksuVariant }}</code>"
+          • Root: <code>${{ github.event.inputs.ksuVariant }}</code>
+          • KSU ver: <code>${KVER}</code>"
           fi
 
           if [[ -d "${{ env.AK3_DIR }}" ]]; then
-            # Zip AK3 folder for Telegram upload
             TG_ZIP="/tmp/${{ env.ZIP_NAME }}.zip"
             zip -r9 "$TG_ZIP" "${{ env.AK3_DIR }}"/*
 
-            CAPTION="✅ <b>Kernel Build Successful</b>
+            CAPTION="✅ <b>Kernel Build Successful!</b>
 
           📦 <b>Build Info:</b>
           • Kernel: <code>Linux ${{ env.KERNEL_VERSION }}</code>
@@ -456,7 +483,8 @@ jobs:
           • Tag: <code>${{ github.event.inputs.localVersion }}</code>
 
           🕐 <b>Finished:</b> $(date '+%Y-%m-%d %H:%M:%S UTC')
-          📁 <b>File:</b> <code>${{ env.ZIP_NAME }}.zip</code>"
+          📁 <b>File:</b> <code>${{ env.ZIP_NAME }}.zip</code>
+          🔗 <a href=\"https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}\">Actions Run</a>"
 
             HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
               -F document=@"$TG_ZIP" \
