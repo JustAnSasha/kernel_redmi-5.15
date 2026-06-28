@@ -243,10 +243,10 @@ jobs:
             echo "CONFIG_LTO_CLANG_FULL=y" >> "$CONFIG_FILE"
           fi
 
-          # Safe Image size reduction
+          # Safe Image size reduction — strip asm symbols only, no debug changes
           echo "CONFIG_STRIP_ASM_SYMS=y" >> "$CONFIG_FILE"
 
-          # Memory / ZRAM optimizations (safe for 5.15 bengal)
+          # Extra networking configs
           cat >> "$CONFIG_FILE" << 'EOF'
           CONFIG_TCP_CONG_ADVANCED=y
           CONFIG_TCP_CONG_WESTWOOD=y
@@ -254,7 +254,6 @@ jobs:
           CONFIG_DEFAULT_WESTWOOD=y
           CONFIG_ZRAM=y
           CONFIG_ZSMALLOC=y
-          CONFIG_ZSMALLOC_STAT=n
           CONFIG_CRYPTO_LZ4=y
           CONFIG_CRYPTO_LZ4HC=y
           CONFIG_CRYPTO_ZSTD=y
@@ -318,7 +317,10 @@ jobs:
           CONFIG_FILE="arch/arm64/configs/${{ env.DEFCONFIG_NAME }}"
           sed -i '/^CONFIG_KSU/d; /^CONFIG_KSU_SUSFS/d' "$CONFIG_FILE"
 
-          cat >> "$CONFIG_FILE" << 'EOF'
+          # KPROBES only needed for vanilla kernelsu (uses kprobe hooks)
+          # sukisu-ultra / resukisu / next use inline hooks — no kprobes needed = smaller Image
+          if [ "$VARIANT" = "kernelsu" ]; then
+            cat >> "$CONFIG_FILE" << 'EOF'
           CONFIG_KSU=y
           CONFIG_KPROBES=y
           CONFIG_HAVE_KPROBES=y
@@ -340,7 +342,33 @@ jobs:
           CONFIG_KSU_SUSFS_OPEN_REDIRECT=y
           CONFIG_KSU_SUSFS_SUS_MAP=y
           CONFIG_KSU_SUSFS_SUS_SU=y
+          CONFIG_TMPFS_XATTR=y
+          CONFIG_TMPFS_POSIX_ACL=y
           EOF
+          else
+            cat >> "$CONFIG_FILE" << 'EOF'
+          CONFIG_KSU=y
+          CONFIG_OVERLAY_FS=y
+          CONFIG_KSU_SUSFS=y
+          CONFIG_KSU_SUSFS_HAS_MAGIC_MOUNT=y
+          CONFIG_KSU_SUSFS_SUS_PATH=y
+          CONFIG_KSU_SUSFS_SUS_MOUNT=y
+          CONFIG_KSU_SUSFS_AUTO_ADD_SUS_KSU_DEFAULT_MOUNT=y
+          CONFIG_KSU_SUSFS_AUTO_ADD_SUS_BIND_MOUNT=y
+          CONFIG_KSU_SUSFS_AUTO_ADD_TRY_UMOUNT_FOR_BIND_MOUNT=y
+          CONFIG_KSU_SUSFS_SUS_KSTAT=y
+          CONFIG_KSU_SUSFS_TRY_UMOUNT=y
+          CONFIG_KSU_SUSFS_SPOOF_UNAME=y
+          CONFIG_KSU_SUSFS_ENABLE_LOG=y
+          CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS=y
+          CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG=y
+          CONFIG_KSU_SUSFS_OPEN_REDIRECT=y
+          CONFIG_KSU_SUSFS_SUS_MAP=y
+          CONFIG_KSU_SUSFS_SUS_SU=y
+          CONFIG_TMPFS_XATTR=y
+          CONFIG_TMPFS_POSIX_ACL=y
+          EOF
+          fi
 
       - name: "🔨 Compile kernel"
         working-directory: ${{ env.WORK_DIR }}
@@ -363,7 +391,6 @@ jobs:
           [ -f oImage ] && mv -f oImage Image
 
       - name: "📦 Prepare AnyKernel3 package"
-        id: prepare_ak3
         working-directory: ${{ env.WORK_DIR }}
         run: |
           BUILD_TIME=$(date +'%Y-%m-%d')
@@ -374,13 +401,11 @@ jobs:
             exit 1
           fi
 
-          # Save named Image copy for reference
-          cp out/dist/Image Image.$VARIANT_NAME
-
-          # Clone AnyKernel3, strip git, inject Image
           git clone --depth=1 https://github.com/ShiningAsStar/AnyKernel3 -b master AK3_Workspace
           rm -rf AK3_Workspace/.git
-          cp out/dist/Image AK3_Workspace/Image
+
+          # Copy Image with variant name — this is what ends up inside the zip
+          cp out/dist/Image AK3_Workspace/Image.$VARIANT_NAME
 
           KSU_INFO=""
           if [ "$VARIANT_NAME" = "ksu" ]; then
@@ -397,7 +422,7 @@ jobs:
       - name: "📤 Upload build artifact"
         uses: actions/upload-artifact@v4
         with:
-          # Upload folder directly — upload-artifact wraps it into one clean zip named ZIP_NAME.zip
+          # Upload folder directly — upload-artifact zips it once into ZIP_NAME.zip
           name: ${{ env.ZIP_NAME }}
           path: ${{ env.AK3_DIR }}
           compression-level: 9
@@ -412,10 +437,9 @@ jobs:
           fi
 
           if [[ -d "${{ env.AK3_DIR }}" ]]; then
-            # Build success — zip and send
-            cd "${{ env.AK3_DIR }}"
-            zip -r9 "/tmp/${{ env.ZIP_NAME }}.zip" ./*
-            cd -
+            # Zip AK3 folder for Telegram upload
+            TG_ZIP="/tmp/${{ env.ZIP_NAME }}.zip"
+            zip -r9 "$TG_ZIP" "${{ env.AK3_DIR }}"/*
 
             CAPTION="✅ <b>Kernel Build Successful</b>
 
@@ -434,12 +458,13 @@ jobs:
           🕐 <b>Finished:</b> $(date '+%Y-%m-%d %H:%M:%S UTC')
           📁 <b>File:</b> <code>${{ env.ZIP_NAME }}.zip</code>"
 
-            curl -s \
-              -F document=@"/tmp/${{ env.ZIP_NAME }}.zip" \
+            HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+              -F document=@"$TG_ZIP" \
               -F caption="$CAPTION" \
               -F parse_mode="HTML" \
               -F chat_id=${{ secrets.TELEGRAM_USER_ID }} \
-              "https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendDocument"
+              "https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendDocument")
+            echo "Telegram sendDocument HTTP: $HTTP_CODE"
           else
             CAPTION="❌ <b>Kernel Build Failed</b>
 
@@ -449,13 +474,14 @@ jobs:
           • Type: <code>${{ matrix.variant }}</code>${KSU_TEXT}
 
           🕐 <b>Failed:</b> $(date '+%Y-%m-%d %H:%M:%S UTC')
-
           🔍 <a href=\"https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}\">Check workflow logs</a>"
 
-            curl -s -X POST \
+            HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+              -X POST \
               -d chat_id=${{ secrets.TELEGRAM_USER_ID }} \
               -d text="$CAPTION" \
               -d parse_mode="HTML" \
-              "https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage"
+              "https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage")
+            echo "Telegram sendMessage HTTP: $HTTP_CODE"
           fi
           
