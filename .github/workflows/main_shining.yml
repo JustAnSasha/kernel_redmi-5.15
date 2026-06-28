@@ -417,7 +417,7 @@ jobs:
           rm -rf AK3_Workspace/.git
 
           # Compress Image with lz4 to reduce zip size, keep original name with variant suffix
-          lz4 -B6 --content-size out/dist/Image out/dist/Image.lz4
+          lz4 -f -B6 --content-size out/dist/Image out/dist/Image.lz4
           if [ -f out/dist/Image.lz4 ]; then
             ORIG=$(wc -c < out/dist/Image)
             COMP=$(wc -c < out/dist/Image.lz4)
