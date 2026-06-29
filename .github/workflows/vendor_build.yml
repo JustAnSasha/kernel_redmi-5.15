@@ -36,8 +36,8 @@ jobs:
         
         repo init -u https://github.com/LineageOS/android.git -b lineage-23.0 --git-lfs --depth=1
         
-        git clone https://github.com/saroj-nokia/device_xiaomi_sapphire.git -b lineage-23 device/xiaomi/sapphire
-        git clone https://github.com/saroj-nokia/vendor_xiaomi_sapphire.git -b lineage-23 vendor/xiaomi/sapphire
+        git clone https://github.com/saroj-nokia/device_xiaomi_sapphire.git -b lineage-23.2 device/xiaomi/sapphire
+        git clone https://github.com/saroj-nokia/vendor_xiaomi_sapphire.git -b lineage-23.2 vendor/xiaomi/sapphire
         
         repo sync -c -j$(nproc --all) --force-sync --no-clone-bundle --no-tags
 
@@ -53,3 +53,4 @@ jobs:
       with:
         name: sapphire-64bit-vendor
         path: android/out/target/product/sapphire/vendor.img
+        
