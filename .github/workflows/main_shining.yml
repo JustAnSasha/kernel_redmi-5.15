@@ -394,6 +394,8 @@ jobs:
 
       - name: "📱 Send Telegram notification"
         if: always()
+        env:
+          TELEGRAPH_TOKEN: ${{ secrets.TELEGRAPH_TOKEN }}
         run: |
           KSU_TEXT=""
           if [ "${{ matrix.variant }}" = "ksu" ]; then
@@ -418,10 +420,6 @@ jobs:
           import json, urllib.request, urllib.parse, os
           e = os.environ.get
 
-          def feat(val, name):
-              icon = "✅" if val.lower() == "true" or val.lower() != "false" else "❌"
-              return {"tag": "li", "children": [f"{icon} {name}"]}
-
           content = [
               {"tag": "h3", "children": [f"Kernel Build — {e('TG_KERNEL_VERSION')}"]},
               {"tag": "hr"},
@@ -441,7 +439,8 @@ jobs:
               {"tag": "hr"},
               {"tag": "p", "children": [
                   {"tag": "a", "attrs": {"href": e("TG_RUN_URL")}, "children": ["🔗 GitHub Actions Run"]}
-              ]}
+              ]},
+              {"tag": "p", "children": ["Built by GitHub Actions"]},
           ]
 
           data = {
