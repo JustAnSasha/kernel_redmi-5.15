@@ -394,7 +394,7 @@ jobs:
 
       - name: "📱 Send Telegram notification"
         if: always()
-        run: |2
+        run: |
           KSU_TEXT=""
           if [ "${{ matrix.variant }}" = "ksu" ]; then
             KSU_TEXT="
@@ -468,7 +468,7 @@ jobs:
           except Exception:
               print("")
           PYEOF
-            )
+          )
 
           if [[ -d "${{ env.AK3_DIR }}" ]]; then
             TG_ZIP="/tmp/${{ env.ZIP_NAME }}.zip"
