@@ -299,17 +299,21 @@ jobs:
             sed -i '1i #include <linux/cred.h>' include/linux/susfs_def.h
           fi
 
-          if [ "$VARIANT" = "kernelsu" ]; then
-            cp -rf susfs4ksu/kernel_patches/KernelSU/kernel/* "KernelSU/kernel/"
+          if [ "$VARIANT" = "kernelsu" ] || [ "$VARIANT" = "sukisu-ultra" ]; then
+            if [ -d "susfs4ksu/kernel_patches/KernelSU/kernel" ]; then
+              cp -rf susfs4ksu/kernel_patches/KernelSU/kernel/* "KernelSU/kernel/" || true
+            fi
             patch -p1 -d KernelSU --forward --fuzz=3 < "../susfs4ksu/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch" || true
-          elif [ "$VARIANT" = "sukisu-ultra" ]; then
-            cp -rf susfs4ksu/kernel_patches/KernelSU/kernel/* "KernelSU/kernel/"
-            patch -p1 -d KernelSU --forward --fuzz=3 < "../susfs4ksu/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch" || true
-            if [ ! -L "drivers/kernelsu" ]; then ln -sf ../KernelSU drivers/kernelsu; fi
+            
+            if [ "$VARIANT" = "sukisu-ultra" ] && [ ! -L "drivers/kernelsu" ]; then 
+              ln -sf ../KernelSU drivers/kernelsu
+            fi
           elif [ "$VARIANT" = "resukisu" ]; then
             if [ ! -L "drivers/kernelsu" ]; then ln -sf ../KernelSU drivers/kernelsu; fi
           elif [ "$VARIANT" = "next" ]; then
-            [ -d "susfs4ksu/kernel_patches/KernelSU/kernel" ] && cp -rf susfs4ksu/kernel_patches/KernelSU/kernel/* "KernelSU-Next/kernel/"
+            if [ -d "susfs4ksu/kernel_patches/KernelSU/kernel" ]; then
+              cp -rf susfs4ksu/kernel_patches/KernelSU/kernel/* "KernelSU-Next/kernel/" || true
+            fi
             patch -p1 -d KernelSU-Next --forward --fuzz=3 < "../susfs4ksu/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch" || true
           fi
 
