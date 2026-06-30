@@ -394,16 +394,91 @@ jobs:
 
       - name: "📱 Send Telegram notification"
         if: always()
-        run: |
+        run: |2
           KSU_TEXT=""
           if [ "${{ matrix.variant }}" = "ksu" ]; then
             KSU_TEXT="
           • Root: <code>${{ github.event.inputs.ksuVariant }}</code>"
           fi
 
+          BUILD_TIME="$(TZ='Asia/Shanghai' date +'%Y-%m-%d %H:%M:%S')"
+          export TG_KERNEL_VERSION="${{ env.KERNEL_VERSION }}"
+          export TG_BRANCH="${{ github.event.inputs.kernelBranch }}"
+          export TG_DEVICE="${{ github.event.inputs.kernelDevice }}"
+          export TG_OPTIMIZATION="-${{ github.event.inputs.optimizationLevel }}"
+          export TG_TICK_RATE="${{ github.event.inputs.tickRate }}Hz"
+          export TG_VARIANT="${{ matrix.variant }}"
+          export TG_KSU_VARIANT="${{ github.event.inputs.ksuVariant }}"
+          export TG_LTO="${{ github.event.inputs.LtoOptimizations }}"
+          export TG_TAG="${{ github.event.inputs.localVersion }}"
+          export TG_BUILD_TIME="$BUILD_TIME"
+          export TG_RUN_URL="https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+
+          TELEGRAPH_URL=$(python3 << 'PYEOF'
+          import json, urllib.request, urllib.parse, os
+          e = os.environ.get
+
+          def feat(val, name):
+              icon = "✅" if val.lower() == "true" or val.lower() != "false" else "❌"
+              return {"tag": "li", "children": [f"{icon} {name}"]}
+
+          content = [
+              {"tag": "h3", "children": [f"Kernel Build — {e('TG_KERNEL_VERSION')}"]},
+              {"tag": "hr"},
+              {"tag": "h4", "children": ["📋 Build Info"]},
+              {"tag": "ul", "children": [
+                  {"tag": "li", "children": [{"tag": "strong", "children": ["Kernel: "]}, e("TG_KERNEL_VERSION")]},
+                  {"tag": "li", "children": [{"tag": "strong", "children": ["Branch: "]}, e("TG_BRANCH")]},
+                  {"tag": "li", "children": [{"tag": "strong", "children": ["Device: "]}, e("TG_DEVICE")]},
+                  {"tag": "li", "children": [{"tag": "strong", "children": ["Optimization: "]}, e("TG_OPTIMIZATION")]},
+                  {"tag": "li", "children": [{"tag": "strong", "children": ["Tick Rate: "]}, e("TG_TICK_RATE")]},
+                  {"tag": "li", "children": [{"tag": "strong", "children": ["Variant: "]}, e("TG_VARIANT")]},
+                  {"tag": "li", "children": [{"tag": "strong", "children": ["KSU Variant: "]}, e("TG_KSU_VARIANT") if e("TG_KSU_VARIANT") else "—"]},
+                  {"tag": "li", "children": [{"tag": "strong", "children": ["LTO: "]}, e("TG_LTO")]},
+                  {"tag": "li", "children": [{"tag": "strong", "children": ["Local Tag: "]}, e("TG_TAG") if e("TG_TAG") else "—"]},
+                  {"tag": "li", "children": [{"tag": "strong", "children": ["Build Time: "]}, e("TG_BUILD_TIME")]},
+              ]},
+              {"tag": "hr"},
+              {"tag": "p", "children": [
+                  {"tag": "a", "attrs": {"href": e("TG_RUN_URL")}, "children": ["🔗 GitHub Actions Run"]}
+              ]}
+          ]
+
+          data = {
+              "access_token": os.environ.get("TELEGRAPH_TOKEN", ""),
+              "title": f"Kernel {e('TG_KERNEL_VERSION')} — {e('TG_DEVICE')}",
+              "author_name": "GitHub Actions",
+              "author_url": f"https://github.com/{e('GITHUB_REPOSITORY')}",
+              "content": json.dumps(content),
+              "return_content": "false"
+          }
+
+          req = urllib.request.Request(
+              "https://api.telegra.ph/createPage",
+              data=urllib.parse.urlencode(data).encode(),
+              method="POST"
+          )
+          try:
+              with urllib.request.urlopen(req, timeout=15) as resp:
+                  result = json.load(resp)
+                  if result.get("ok"):
+                      print(result["result"]["url"])
+                  else:
+                      print("")
+          except Exception:
+              print("")
+          PYEOF
+            )
+
           if [[ -d "${{ env.AK3_DIR }}" ]]; then
             TG_ZIP="/tmp/${{ env.ZIP_NAME }}.zip"
             (cd "${{ env.AK3_DIR }}" && zip -r9 "$TG_ZIP" ./)
+
+            DETAILS_LINK=""
+            if [ -n "$TELEGRAPH_URL" ]; then
+              DETAILS_LINK="
+          📄 <b>Full specs:</b> <a href=\"$TELEGRAPH_URL\">Telegraph page</a>"
+            fi
 
             CAPTION="✅ <b>Kernel Build Successful!</b>
 
@@ -420,7 +495,7 @@ jobs:
           • Tag: <code>${{ github.event.inputs.localVersion }}</code>
 
           🕐 <b>Finished:</b> $(date '+%Y-%m-%d %H:%M:%S UTC')
-          📁 <b>File:</b> <code>${{ env.ZIP_NAME }}.zip</code>"
+          📁 <b>File:</b> <code>${{ env.ZIP_NAME }}.zip</code>${DETAILS_LINK}"
 
             curl -s -o /dev/null -w "Telegram HTTP: %{http_code}\n" \
               -F document=@"$TG_ZIP" \
@@ -445,4 +520,4 @@ jobs:
               -d parse_mode="HTML" \
               "https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage" || true
           fi
-          
+
