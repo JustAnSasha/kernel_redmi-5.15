@@ -286,29 +286,37 @@ jobs:
         run: |
           set -e
           VARIANT="${{ github.event.inputs.ksuVariant }}"
+
           git clone --depth=1 https://gitlab.com/simonpunk/susfs4ksu.git -b gki-android13-5.15
 
-          curl -LSs "https://raw.githubusercontent.com/ShiningAsStar/extra_kernel_stuff/main/50_add_susfs_in_gki-android13-5.15.patch" \
-            | patch -p1 --forward || true
+          cp susfs4ksu/kernel_patches/fs/susfs.c fs/
+          cp susfs4ksu/kernel_patches/include/linux/susfs.h include/linux/
+          cp susfs4ksu/kernel_patches/include/linux/susfs_def.h include/linux/
 
-          cp -f susfs4ksu/kernel_patches/fs/susfs.c fs/susfs.c
-          cp -f susfs4ksu/kernel_patches/include/linux/susfs.h include/linux/susfs.h
-          cp -f susfs4ksu/kernel_patches/include/linux/susfs_def.h include/linux/susfs_def.h
-          grep -q "#include <linux/cred.h>" include/linux/susfs_def.h || \
+          if ! grep -q '#include <linux/cred.h>' include/linux/susfs_def.h; then
             sed -i '1i #include <linux/cred.h>' include/linux/susfs_def.h
-
-          if [ "$VARIANT" = "kernelsu" ]; then
-            cp -rf susfs4ksu/kernel_patches/KernelSU/kernel/* KernelSU/kernel/
-            patch -p1 -d KernelSU --forward --fuzz=3 \
-              < susfs4ksu/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch || true
-          elif [ "$VARIANT" = "next" ]; then
-            cp -rf susfs4ksu/kernel_patches/KernelSU/kernel/* KernelSU-Next/kernel/
-            patch -p1 -d KernelSU-Next --forward --fuzz=3 \
-              < susfs4ksu/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch || true
-          elif [ "$VARIANT" = "resukisu" ]; then
-            # ReSukiSU already has SUSFS integration
-            true
           fi
+
+          curl -Lso 50_add_susfs.patch \
+            "https://raw.githubusercontent.com/ShiningAsStar/extra_kernel_stuff/main/50_add_susfs_in_gki-android13-5.15.patch"
+          patch -p1 --forward < 50_add_susfs.patch || true
+
+          grep -q "SUSFS_IS_INODE_SUS_MAP(file_inode(vma->vm_file))" fs/proc/task_mmu.c \
+            || { echo "❌ SUS_MAP guard missing"; exit 1; }
+
+          case "$VARIANT" in
+            kernelsu|next)
+              TARGET_DIR=""
+              [ "$VARIANT" = "kernelsu" ] && TARGET_DIR="KernelSU"
+              [ "$VARIANT" = "next" ]     && TARGET_DIR="KernelSU-Next"
+              cp -rf susfs4ksu/kernel_patches/KernelSU/kernel/* "$TARGET_DIR/kernel/"
+              patch -p1 -d "$TARGET_DIR" --forward --fuzz=3 \
+                < susfs4ksu/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch || true
+              ;;
+            sukisu-ultra|resukisu)
+              true
+              ;;
+          esac
 
           if ! grep -rq "^config KSU_SUSFS" drivers/ 2>/dev/null; then
             printf '\nconfig KSU_SUSFS\n\tbool "KernelSU SuSFS"\n\tdepends on KSU\n\tdefault n\n' >> fs/Kconfig
@@ -489,4 +497,3 @@ jobs:
             -d chat_id="${TELEGRAM_CHAT_ID}" \
             -d text="${CAPTION}" \
             -d parse_mode="HTML"
-            
