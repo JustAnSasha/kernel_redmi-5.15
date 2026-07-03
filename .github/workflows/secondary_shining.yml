@@ -489,3 +489,4 @@ jobs:
             -d chat_id="${TELEGRAM_CHAT_ID}" \
             -d text="${CAPTION}" \
             -d parse_mode="HTML"
+            
