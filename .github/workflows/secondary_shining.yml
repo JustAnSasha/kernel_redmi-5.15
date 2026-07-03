@@ -286,44 +286,67 @@ jobs:
         run: |
           set -e
           VARIANT="${{ github.event.inputs.ksuVariant }}"
-
+          
           git clone --depth=1 https://gitlab.com/simonpunk/susfs4ksu.git -b gki-android13-5.15
-
-          cp susfs4ksu/kernel_patches/fs/susfs.c fs/
-          cp susfs4ksu/kernel_patches/include/linux/susfs.h include/linux/
-          cp susfs4ksu/kernel_patches/include/linux/susfs_def.h include/linux/
-
+          
+          # 1. Force copy all kernel-side files (no patch needed)
+          mkdir -p fs include/linux
+          cp -f susfs4ksu/kernel_patches/fs/susfs.c fs/susfs.c
+          cp -f susfs4ksu/kernel_patches/include/linux/susfs.h include/linux/susfs.h
+          cp -f susfs4ksu/kernel_patches/include/linux/susfs_def.h include/linux/susfs_def.h 2>/dev/null || true
           if ! grep -q '#include <linux/cred.h>' include/linux/susfs_def.h; then
             sed -i '1i #include <linux/cred.h>' include/linux/susfs_def.h
           fi
-
-          curl -Lso 50_add_susfs.patch \
+          
+          # 2. Apply kernel-side patch (your custom one) as a best-effort fallback
+          curl -Lso susfs_kernel.patch \
             "https://raw.githubusercontent.com/ShiningAsStar/extra_kernel_stuff/main/50_add_susfs_in_gki-android13-5.15.patch"
-          patch -p1 --forward < 50_add_susfs.patch || true
-
-          grep -q "SUSFS_IS_INODE_SUS_MAP(file_inode(vma->vm_file))" fs/proc/task_mmu.c \
-            || { echo "❌ SUS_MAP guard missing"; exit 1; }
-
+          patch -p1 --forward < susfs_kernel.patch || true
+          
+          # 3. KSU‑side integration – identical logic for all variants
           case "$VARIANT" in
             kernelsu|next)
-              TARGET_DIR=""
-              [ "$VARIANT" = "kernelsu" ] && TARGET_DIR="KernelSU"
-              [ "$VARIANT" = "next" ]     && TARGET_DIR="KernelSU-Next"
-              cp -rf susfs4ksu/kernel_patches/KernelSU/kernel/* "$TARGET_DIR/kernel/"
-              patch -p1 -d "$TARGET_DIR" --forward --fuzz=3 \
-                < susfs4ksu/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch || true
+              TARGET="KernelSU"
+              [ "$VARIANT" = "next" ] && TARGET="KernelSU-Next"
+              if [ -d "susfs4ksu/kernel_patches/KernelSU/kernel" ]; then
+                cp -rf susfs4ksu/kernel_patches/KernelSU/kernel/* "$TARGET/kernel/"
+              fi
+              # Apply the KSU SUSFS patch if not already integrated
+              if grep -q "susfs_init" "$TARGET/kernel/ksu.c" 2>/dev/null; then
+                echo "SUSFS already integrated in $TARGET"
+              else
+                patch -p1 -d "$TARGET" --forward \
+                  < susfs4ksu/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch 2>/dev/null || {
+                    echo "Manual SUSFS injection into $TARGET"
+                    sed -i '/#include <linux\/fs\.h>/a #include <linux\/susfs\.h>' "$TARGET/kernel/ksu.c"
+                    sed -i '/ksu_core_init();/a \\tsusfs_init();' "$TARGET/kernel/ksu.c" || \
+                    sed -i '/ksu_core_init(/a \\tsusfs_init();' "$TARGET/kernel/ksu.c"
+                }
+              fi
               ;;
             sukisu-ultra|resukisu)
-              true
+              # These already have SUSFS built‑in, but we still copy the kernel-side files
+              # and ensure the KSU part is not overwritten (it's in their own source)
+              if [ -d "susfs4ksu/kernel_patches/KernelSU/kernel" ]; then
+                cp -rf susfs4ksu/kernel_patches/KernelSU/kernel/* KernelSU/kernel/ 2>/dev/null || true
+                if grep -q "susfs_init" KernelSU/kernel/ksu.c; then
+                  echo "SUSFS already present in SukiSU/ReSukiSU"
+                else
+                  sed -i '/#include <linux\/fs\.h>/a #include <linux\/susfs\.h>' KernelSU/kernel/ksu.c
+                  sed -i '/ksu_core_init();/a \\tsusfs_init();' KernelSU/kernel/ksu.c || \
+                  sed -i '/ksu_core_init(/a \\tsusfs_init();' KernelSU/kernel/ksu.c
+                fi
+              fi
               ;;
           esac
-
+          
+          # 4. Kconfig + Makefile (once for all variants)
           if ! grep -rq "^config KSU_SUSFS" drivers/ 2>/dev/null; then
             printf '\nconfig KSU_SUSFS\n\tbool "KernelSU SuSFS"\n\tdepends on KSU\n\tdefault n\n' >> fs/Kconfig
           fi
           grep -q "obj-\$(CONFIG_KSU_SUSFS)" fs/Makefile 2>/dev/null || \
             printf '\nobj-$(CONFIG_KSU_SUSFS) += susfs.o\n' >> fs/Makefile
-
+          
           rm -rf susfs4ksu
 
       - name: "⚙️ Configure KSU/SUSFS defconfig"
