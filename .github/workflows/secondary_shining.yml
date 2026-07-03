@@ -277,9 +277,10 @@ jobs:
           curl -LSs "https://raw.githubusercontent.com/ShiningAsStar/extra_kernel_stuff/main/50_add_susfs_in_gki-android13-5.15.patch" \
             | patch -p1 --forward || true
           cp -f susfs4ksu/kernel_patches/fs/susfs.c fs/susfs.c
-          
-          # Mark unused function to suppress warning
-          sed -i 's/static int copy_config_to_buf/__attribute__((unused)) static int copy_config_to_buf/' fs/susfs.c
+           
+           # Mark unused function to suppress warning
+           sed -i 's/static int copy_config_to_buf/__attribute__((unused)) static int copy_config_to_buf/' fs/susfs.c
+           sed -i 's/size_t copied_size = 0;/__attribute__((unused)) size_t copied_size = 0;/' fs/susfs.c
           
           cp -f susfs4ksu/kernel_patches/include/linux/susfs.h include/linux/susfs.h
           cp -f susfs4ksu/kernel_patches/include/linux/susfs_def.h include/linux/susfs_def.h
