@@ -253,61 +253,69 @@ jobs:
           echo "CONFIG_BBG=y" >> arch/arm64/configs/${{ env.DEFCONFIG_NAME }}
           sed -i '/^config LSM$/,/^help$/{ /^[[:space:]]*default/ { /baseband_guard/! s/selinux/selinux,baseband_guard/ } }' security/Kconfig
 
-      - name: "🔑 Setup KernelSU manager"
+      - name: "🔑 Setup KernelSU and SUSFS"
         if: matrix.variant == 'ksu'
         working-directory: ./${{ env.kernelDir }}/${{ env.kernelName }}
         run: |
           set -e
           VARIANT="${{ github.event.inputs.ksuVariant }}"
+          SUSFS="${{ github.event.inputs.SUSFS }}"
           rm -rf KernelSU KernelSU-Next drivers/kernelsu
           case "$VARIANT" in
-            kernelsu)     curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -s main ;;
-            sukisu-ultra) curl -LSs "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh" | bash -s main ;;
-            resukisu)     curl -LSs "https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/main/kernel/setup.sh" | bash ;;
-            next)         curl -LSs "https://raw.githubusercontent.com/pershoot/KernelSU-Next/dev-susfs/kernel/setup.sh" | bash -s dev-susfs ;;
-          esac
-
-      - name: "🔑 Setup SUSFS patches"
-        if: matrix.variant == 'ksu' && github.event.inputs.SUSFS == 'true'
-        working-directory: ./${{ env.kernelDir }}/${{ env.kernelName }}
-        run: |
-          set -e
-          VARIANT="${{ github.event.inputs.ksuVariant }}"
-          git clone --depth=1 https://gitlab.com/simonpunk/susfs4ksu.git -b gki-android13-5.15
-          curl -LSs "https://raw.githubusercontent.com/ShiningAsStar/extra_kernel_stuff/main/50_add_susfs_in_gki-android13-5.15.patch" \
-            | patch -p1 --forward || true
-          cp -f susfs4ksu/kernel_patches/fs/susfs.c fs/susfs.c
-          
-          cp -f susfs4ksu/kernel_patches/include/linux/susfs.h include/linux/susfs.h
-          cp -f susfs4ksu/kernel_patches/include/linux/susfs_def.h include/linux/susfs_def.h
-          grep -q "#include <linux/cred.h>" include/linux/susfs_def.h || \
-            sed -i '1i #include <linux/cred.h>' include/linux/susfs_def.h
-          case "$VARIANT" in
             kernelsu)
-              [ -d susfs4ksu/kernel_patches/KernelSU/kernel ] && \
-                cp -rf susfs4ksu/kernel_patches/KernelSU/kernel/* KernelSU/kernel/
-              patch -p1 -d KernelSU --forward --fuzz=3 \
-                < susfs4ksu/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch || true
+              curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -s main
+              ;;
+            sukisu-ultra)
+              if [ "$SUSFS" = "true" ]; then
+                curl -LSs "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh" | bash -s susfs-gki-android13-5.15
+              else
+                curl -LSs "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh" | bash -s main
+              fi
+              ;;
+            resukisu)
+              curl -LSs "https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/main/kernel/setup.sh" | bash
               ;;
             next)
-              [ -d susfs4ksu/kernel_patches/KernelSU/kernel ] && \
-                cp -rf susfs4ksu/kernel_patches/KernelSU/kernel/* KernelSU-Next/kernel/
-              patch -p1 -d KernelSU-Next --forward --fuzz=3 \
-                < susfs4ksu/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch || true
-              ;;
-            sukisu-ultra|resukisu)
+              curl -LSs "https://raw.githubusercontent.com/pershoot/KernelSU-Next/dev-susfs/kernel/setup.sh" | bash -s dev-susfs
               ;;
           esac
-          if ! grep -rq "^config KSU_SUSFS" drivers/ 2>/dev/null; then
-            printf '\nconfig KSU_SUSFS\n\tbool "KernelSU SuSFS"\n\tdepends on KSU\n\tdefault n\n' >> fs/Kconfig
+          if [ "$SUSFS" = "true" ] && [ "$VARIANT" != "sukisu-ultra" ]; then
+            git clone --depth=1 https://gitlab.com/simonpunk/susfs4ksu.git -b gki-android13-5.15
+            curl -LSs "https://raw.githubusercontent.com/ShiningAsStar/extra_kernel_stuff/main/50_add_susfs_in_gki-android13-5.15.patch" \
+              | patch -p1 --forward || true
+            cp -f susfs4ksu/kernel_patches/fs/susfs.c fs/susfs.c
+            cp -f susfs4ksu/kernel_patches/include/linux/susfs.h include/linux/susfs.h
+            cp -f susfs4ksu/kernel_patches/include/linux/susfs_def.h include/linux/susfs_def.h
+            grep -q "#include <linux/cred.h>" include/linux/susfs_def.h || \
+              sed -i '1i #include <linux/cred.h>' include/linux/susfs_def.h
+            case "$VARIANT" in
+              kernelsu)
+                [ -d susfs4ksu/kernel_patches/KernelSU/kernel ] && \
+                  cp -rf susfs4ksu/kernel_patches/KernelSU/kernel/* KernelSU/kernel/
+                patch -p1 -d KernelSU --forward --fuzz=3 \
+                  < susfs4ksu/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch || true
+                ;;
+              next)
+                [ -d susfs4ksu/kernel_patches/KernelSU/kernel ] && \
+                  cp -rf susfs4ksu/kernel_patches/KernelSU/kernel/* KernelSU-Next/kernel/
+                patch -p1 -d KernelSU-Next --forward --fuzz=3 \
+                  < susfs4ksu/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch || true
+                ;;
+              resukisu)
+                ;;
+            esac
+            if ! grep -rq "^config KSU_SUSFS" drivers/ 2>/dev/null; then
+              printf '\nconfig KSU_SUSFS\n\tbool "KernelSU SuSFS"\n\tdepends on KSU\n\tdefault n\n' >> fs/Kconfig
+            fi
+            grep -q "obj-\$(CONFIG_KSU_SUSFS)" fs/Makefile 2>/dev/null || \
+              printf '\nobj-$(CONFIG_KSU_SUSFS) += susfs.o\n' >> fs/Makefile
+            rm -rf susfs4ksu
           fi
-          grep -q "obj-\$(CONFIG_KSU_SUSFS)" fs/Makefile 2>/dev/null || \
-            printf '\nobj-$(CONFIG_KSU_SUSFS) += susfs.o\n' >> fs/Makefile
-          rm -rf susfs4ksu
-          
           CONFIG_FILE="arch/arm64/configs/${{ env.DEFCONFIG_NAME }}"
-          sed -i '/^CONFIG_KSU_SUSFS/d' "$CONFIG_FILE"
-          cat >> "$CONFIG_FILE" << 'EOF'
+          sed -i '/^CONFIG_KSU_SUSFS/d; /^CONFIG_KSU=/d' "$CONFIG_FILE"
+          printf 'CONFIG_KSU=y\nCONFIG_OVERLAY_FS=y\n' >> "$CONFIG_FILE"
+          if [ "$SUSFS" = "true" ]; then
+            cat >> "$CONFIG_FILE" << 'EOF'
           CONFIG_KSU_SUSFS=y
           CONFIG_KSU_SUSFS_HAS_MAGIC_MOUNT=y
           CONFIG_KSU_SUSFS_SUS_PATH=y
@@ -325,16 +333,9 @@ jobs:
           CONFIG_KSU_SUSFS_SUS_MAP=y
           CONFIG_KSU_SUSFS_SUS_SU=y
           EOF
+          fi
 
-      - name: "🔑 Setup KernelSU configs"
-        if: matrix.variant == 'ksu'
-        working-directory: ./${{ env.kernelDir }}/${{ env.kernelName }}
-        run: |
-          CONFIG_FILE="arch/arm64/configs/${{ env.DEFCONFIG_NAME }}"
-          sed -i '/^CONFIG_KSU=/d' "$CONFIG_FILE"
-          printf 'CONFIG_KSU=y\nCONFIG_OVERLAY_FS=y\n' >> "$CONFIG_FILE"
-
-      - name: "🛠️ Compile kernel"
+      - name: "🔨 Compile kernel"
         working-directory: ${{ env.WORK_DIR }}
         run: |
           export PATH=$CLANG_PATH/bin:$PATH
