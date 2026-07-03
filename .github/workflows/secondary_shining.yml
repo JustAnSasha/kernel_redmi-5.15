@@ -387,35 +387,34 @@ jobs:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_USER_ID }}
         run: |
-          DATE=$(date +"%Y-%m-%d %H:%M:%S %Z")
-          REPO_URL="https://github.com/${{ github.repository }}"
-          RUN_URL="$REPO_URL/actions/runs/${{ github.run_id }}"
-          TIME_NOW="$(TZ='UTC' date +'%Y-%m-%d %H:%M:%S UTC')"
-          KSU_TYPE="Vanilla"
-          if [ "${{ matrix.variant }}" = "ksu" ]; then
-            case "${{ github.event.inputs.ksuVariant }}" in
-              kernelsu)     KSU_TYPE="KernelSU" ;;
-              sukisu-ultra) KSU_TYPE="SukiSU-Ultra" ;;
-              resukisu)     KSU_TYPE="ReSukiSU" ;;
-              next)         KSU_TYPE="KernelSU-Next" ;;
-            esac
-          fi
-          SPOOF_VER="${{ github.event.inputs.kernelSpoofVersion }}"
-          [ -z "$SPOOF_VER" ] && SPOOF_VER="5.15"
-          export KSU_TYPE SPOOF_VER
-          export TG_KSU_ENABLED="$( [ '${{ matrix.variant }}' = 'ksu' ] && echo true || echo false )"
-          export TG_BRANCH="${{ github.event.inputs.kernelBranch }}"
-          export TG_OPT="${{ github.event.inputs.optimizationLevel }}"
-          export TG_TICK="${{ github.event.inputs.tickRate }}"
-          export TG_LTO="${{ github.event.inputs.LtoOptimizations }}"
-          export TG_BBG="$( [ '${{ github.event.inputs.bbg }}' = 'on' ] && echo true || echo false )"
-          export TG_KPM="$( [ '${{ github.event.inputs.KPM }}' = 'on' ] && echo true || echo false )"
-          export TG_SUSFS="${{ github.event.inputs.SUSFS }}"
-          export TG_BUILD_NUM="${{ github.run_number }}"
-          export TG_TIME="$TIME_NOW"
-          export TG_RUN_URL="$RUN_URL"
-          export TG_REPO="${{ github.repository }}"
+          pip3 install --quiet telegraph 2>/dev/null || true
+          export TIME_NOW="$(TZ='UTC' date +'%Y-%m-%d %H:%M:%S UTC')"
+          export REPO_URL="https://github.com/${{ github.repository }}"
+          export RUN_URL="$REPO_URL/actions/runs/${{ github.run_id }}"
           TELEGRAPH_URL=$(python3 << 'PYEOF'
+          import os, sys
+          try:
+              from telegraph import Telegraph
+              telegraph = Telegraph(os.environ.get("TELEGRAPH_TOKEN"))
+              page = telegraph.create_page(
+                  title="Shiney Kernel Build Info",
+                  html_content=f"""
+                  <h3>Build Details</h3>
+                  <p>Device: Redmi Note 13 (sapphire)</p>
+                  <p>Kernel: {os.environ.get('SPOOF_VER', '5.15')}-android13</p>
+                  <p>KSU Type: {os.environ.get('KSU_TYPE', 'Vanilla')}</p>
+                  <p>Optimization: -{os.environ.get('TG_OPT', 'O3')} · {os.environ.get('TG_TICK', '250')}Hz · LTO:{os.environ.get('TG_LTO', 'thin')}</p>
+                  <p>Build Number: {os.environ.get('TG_BUILD_NUM', 'N/A')}</p>
+                  <p>Time: {os.environ.get('TG_TIME', 'N/A')}</p>
+                  <p><a href="{os.environ.get('TG_RUN_URL', '#')}">View GitHub Actions Run</a></p>
+                  """,
+                  author_name="GitHub Actions",
+                  author_url=os.environ.get("REPO_URL", "#")
+              )
+              print("https://telegra.ph/{}".format(page["path"]))
+          except Exception as e:
+              print("", end="")
+          PYEOF
           )
           TG_ZIP="/tmp/${{ env.ZIP_NAME }}.zip"
           (cd "${{ env.AK3_DIR }}" && zip -r9 "$TG_ZIP" ./)
