@@ -278,8 +278,8 @@ jobs:
             | patch -p1 --forward || true
           cp -f susfs4ksu/kernel_patches/fs/susfs.c fs/susfs.c
           
-          # Fix unused variable in susfs.c
-          sed -i '/size_t copied_size = 0;/d' fs/susfs.c
+          # Mark unused function to suppress warning
+          sed -i 's/static int copy_config_to_buf/__attribute__((unused)) static int copy_config_to_buf/' fs/susfs.c
           
           cp -f susfs4ksu/kernel_patches/include/linux/susfs.h include/linux/susfs.h
           cp -f susfs4ksu/kernel_patches/include/linux/susfs_def.h include/linux/susfs_def.h
