@@ -291,7 +291,7 @@ jobs:
           cp susfs4ksu/kernel_patches/include/linux/susfs_def.h include/linux/
           sed -i '1i #include <linux/cred.h>' include/linux/susfs_def.h
 
-          # Fix unused warnings that are errors
+          # Fix unused warnings -> errors
           sed -i 's/size_t copied_size = 0;/size_t __maybe_unused copied_size = 0;/' fs/susfs.c
           sed -i 's/static int copy_config_to_buf/static int __maybe_unused copy_config_to_buf/' fs/susfs.c
 
@@ -301,23 +301,25 @@ jobs:
           rm -f susfs.patch
           echo "✅ Custom SUSFS patch applied"
 
+          # Apply KSU‑side integration (all variants need it)
           case "$VARIANT" in
             kernelsu)
-              cp -rf susfs4ksu/kernel_patches/KernelSU/kernel/* KernelSU/kernel/
-              cd KernelSU
-              patch -p1 --forward < ../susfs4ksu/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch || true
-              cd ..
+              TARGET="KernelSU"
               ;;
             next)
-              cp -rf susfs4ksu/kernel_patches/KernelSU/kernel/* KernelSU-Next/kernel/
-              cd KernelSU-Next
-              patch -p1 --forward < ../susfs4ksu/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch || true
-              cd ..
+              TARGET="KernelSU-Next"
               ;;
             sukisu-ultra|resukisu)
-              echo "✅ SukiSU/ReSukiSU SUSFS integration is built-in"
+              TARGET="KernelSU"
               ;;
           esac
+
+          if [ -d "susfs4ksu/kernel_patches/KernelSU/kernel" ]; then
+            cp -rf susfs4ksu/kernel_patches/KernelSU/kernel/* "$TARGET/kernel/"
+          fi
+          cd "$TARGET"
+          patch -p1 --forward --fuzz=3 < ../susfs4ksu/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch || true
+          cd ..
 
           grep -rq "^config KSU_SUSFS" fs/Kconfig 2>/dev/null || \
             printf '\nconfig KSU_SUSFS\n\tbool "KernelSU SuSFS"\n\tdepends on KSU\n\tdefault n\n' >> fs/Kconfig
