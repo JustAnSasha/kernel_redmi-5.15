@@ -294,33 +294,31 @@ jobs:
           sed -i 's/size_t copied_size = 0;/size_t __maybe_unused copied_size = 0;/' fs/susfs.c
           sed -i 's/static int copy_config_to_buf/static int __maybe_unused copy_config_to_buf/' fs/susfs.c
 
-          # Apply your custom kernel patch – ignore any failures on KSU dirs
+          # Apply your custom kernel patch (50_)
           curl -Lso susfs.patch \
             "https://raw.githubusercontent.com/ShiningAsStar/extra_kernel_stuff/main/50_add_susfs_in_gki-android13-5.15.patch"
           patch -p1 --forward < susfs.patch || true
           rm -f susfs.patch
 
-          # Restore KSU directories to their original state (undo any changes the patch made)
+          # Undo any patch changes to KSU directories (keep SukiSU/ReSukiSU intact)
           for d in KernelSU KernelSU-Next drivers/kernelsu; do
             [ -d "$d" ] && git checkout -- "$d" 2>/dev/null || true
           done
           echo "✅ Kernel-side patch applied, KSU restored"
 
+          # Create weak stub for any missing symbols (satisfies linker safely)
           cat > KernelSU/kernel/ksu_susfs_stubs.c << 'STUBEOF'
           #include <linux/export.h>
           #include <linux/types.h>
 
-          /* Forward declarations for types used in weak stubs */
           struct kstat;
           struct filename;
           struct linux_binprm;
 
-          /* --- SUSFS symbols (weak avoids conflicts) --- */
           bool __weak susfs_is_current_ksu_domain(void) { return false; }
           int __weak susfs_ksu_sid = 0;
           int __weak susfs_priv_app_sid = 0;
 
-          /* --- KSU hook functions (weak) --- */
           int __weak ksu_is_init_rc_hook_enabled(void) { return 0; }
           int __weak ksu_is_input_hook_enabled(void) { return 0; }
           int __weak ksu_handle_sys_reboot(int cmd, const char __user *cmdline) { return 0; }
@@ -331,7 +329,6 @@ jobs:
           int __weak ksu_handle_execveat_sucompat(int fd, struct filename *filename, struct linux_binprm *bprm) { return 0; }
           int __weak ksu_handle_execveat(int fd, struct filename *filename, struct linux_binprm *bprm) { return 0; }
 
-          /* --- SELinux hide symbols (weak) --- */
           bool __weak ksu_selinux_hide_running(void) { return false; }
           bool __weak ksu_selinux_hide_enabled(void) { return false; }
           int __weak fake_state = 0;
@@ -340,33 +337,46 @@ jobs:
           void __weak fake_status_initialize_key(void) { }
           STUBEOF
 
-          # Ensure the stub file is compiled when SUSFS is enabled
           KBUILD="KernelSU/kernel/Kbuild"
           [ -f "$KBUILD" ] || KBUILD="KernelSU/kernel/Makefile"
           if ! grep -q 'ksu_susfs_stubs.o' "$KBUILD"; then
             echo 'obj-$(CONFIG_KSU_SUSFS) += ksu_susfs_stubs.o' >> "$KBUILD"
           fi
 
-          # For kernelsu / next, also apply the full KSU SUSFS integration (they support it)
+          # --- Variant‑specific SUSFS integration ---
           case "$VARIANT" in
-            kernelsu)
-              cp -rf susfs4ksu/kernel_patches/KernelSU/kernel/* KernelSU/kernel/
-              cd KernelSU
-              patch -p1 --forward < ../susfs4ksu/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch || true
-              cd ..
-              ;;
-            next)
-              cp -rf susfs4ksu/kernel_patches/KernelSU/kernel/* KernelSU-Next/kernel/
-              cd KernelSU-Next
+            kernelsu|next)
+              TARGET_DIR="KernelSU"
+              [ "$VARIANT" = "next" ] && TARGET_DIR="KernelSU-Next"
+              # Copy real KSU SUSFS source files
+              if [ -d "susfs4ksu/kernel_patches/KernelSU/kernel" ]; then
+                cp -rf susfs4ksu/kernel_patches/KernelSU/kernel/* "$TARGET_DIR/kernel/"
+              fi
+              # Apply KSU SUSFS patch (full integration)
+              cd "$TARGET_DIR"
               patch -p1 --forward < ../susfs4ksu/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch || true
               cd ..
               ;;
             sukisu-ultra|resukisu)
-              echo "SukiSU/ReSukiSU: using stubs for missing symbols"
+              echo "SukiSU/ReSukiSU: adding real SUSFS source files"
+              # Copy real KSU SUSFS source files (overwrites the stubs with real code)
+              if [ -d "susfs4ksu/kernel_patches/KernelSU/kernel" ]; then
+                cp -rf susfs4ksu/kernel_patches/KernelSU/kernel/* KernelSU/kernel/
+              fi
+              # Ensure susfs.o is compiled in KSU
+              if ! grep -q 'susfs.o' "$KBUILD"; then
+                echo 'obj-$(CONFIG_KSU_SUSFS) += susfs.o' >> "$KBUILD"
+              fi
+              # Manually add susfs_init() call if not already there
+              if ! grep -q "susfs_init" KernelSU/kernel/ksu.c; then
+                sed -i '/#include <linux\/fs\.h>/a #include <linux\/susfs\.h>' KernelSU/kernel/ksu.c
+                sed -i '/ksu_core_init();/a \\tsusfs_init();' KernelSU/kernel/ksu.c || \
+                sed -i '/ksu_core_init(/a \\tsusfs_init();' KernelSU/kernel/ksu.c
+              fi
               ;;
           esac
 
-          # Kconfig + Makefile for kernel-side susfs.o
+          # Kernel-side Kconfig + Makefile (fs/)
           grep -rq "^config KSU_SUSFS" fs/Kconfig 2>/dev/null || \
             printf '\nconfig KSU_SUSFS\n\tbool "KernelSU SuSFS"\n\tdepends on KSU\n\tdefault n\n' >> fs/Kconfig
           grep -q "obj-\$(CONFIG_KSU_SUSFS)" fs/Makefile 2>/dev/null || \
