@@ -306,18 +306,21 @@ jobs:
           done
           echo "✅ Kernel-side patch applied, KSU restored"
 
-          # Create comprehensive stub file for missing KSU / SUSFS symbols
-          # This covers all symbols the kernel-side code expects but SukiSU/ReSukiSU may not provide.
           cat > KernelSU/kernel/ksu_susfs_stubs.c << 'STUBEOF'
           #include <linux/export.h>
           #include <linux/types.h>
 
-          /* --- SUSFS symbols (may already exist; weak avoids conflicts) --- */
+          /* Forward declarations for types used in weak stubs */
+          struct kstat;
+          struct filename;
+          struct linux_binprm;
+
+          /* --- SUSFS symbols (weak avoids conflicts) --- */
           bool __weak susfs_is_current_ksu_domain(void) { return false; }
           int __weak susfs_ksu_sid = 0;
           int __weak susfs_priv_app_sid = 0;
 
-          /* --- KSU hook functions (weak, return success/0) --- */
+          /* --- KSU hook functions (weak) --- */
           int __weak ksu_is_init_rc_hook_enabled(void) { return 0; }
           int __weak ksu_is_input_hook_enabled(void) { return 0; }
           int __weak ksu_handle_sys_reboot(int cmd, const char __user *cmdline) { return 0; }
