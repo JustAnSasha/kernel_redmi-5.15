@@ -284,63 +284,65 @@ jobs:
           set -e
           VARIANT="${{ github.event.inputs.ksuVariant }}"
 
-          # Clone SUSFS repo
           git clone --depth=1 https://gitlab.com/simonpunk/susfs4ksu.git -b gki-android13-5.15
+
           cp susfs4ksu/kernel_patches/fs/susfs.c fs/
           cp susfs4ksu/kernel_patches/include/linux/susfs.h include/linux/
           cp susfs4ksu/kernel_patches/include/linux/susfs_def.h include/linux/
           sed -i '1i #include <linux/cred.h>' include/linux/susfs_def.h
 
-          # Download your custom patch
           curl -Lso susfs.patch \
             "https://raw.githubusercontent.com/ShiningAsStar/extra_kernel_stuff/main/50_add_susfs_in_gki-android13-5.15.patch"
 
-          # Try to apply the patch
           if patch -p1 --forward --dry-run < susfs.patch; then
             patch -p1 --forward < susfs.patch
             echo "✅ Custom SUSFS patch applied cleanly"
           else
-            echo "⚠️ Patch failed – applying manual essential edits"
-            # Manual insertions that the patch would normally do
+            echo "⚠️ Patch failed – applying essential edits manually"
             grep -q 'susfs.h' fs/proc/task_mmu.c || sed -i '/#include <linux\/mm.h>/a #include <linux\/susfs.h>' fs/proc/task_mmu.c
             grep -q 'dma-buf.h' fs/proc/base.c || sed -i '/#include <linux\/cpufreq_times.h>/a #include <linux\/dma-buf.h>' fs/proc/base.c
             grep -q 'zswap.h' mm/memory.c || sed -i '/#include <linux\/sched\/sysctl.h>/a #include <linux\/zswap.h>' mm/memory.c
 
-            # Add the SUS_MAP guard (critical)
             if ! grep -q "SUSFS_IS_INODE_SUS_MAP(file_inode(vma->vm_file))" fs/proc/task_mmu.c; then
-              perl -i -0pe 's/\t\t\tif \(vma->vm_end > last_vma_end\)\n\t\t\t\tsmap_gather_stats\(vma, \&mss, last_vma_end\);/\t\t\tif (vma->vm_end > last_vma_end) {\n\t\t\t\tsmap_gather_stats(vma, \&mss, last_vma_end);\n\t\t\t\tif (IS_ENABLED(CONFIG_KSU_SUSFS_SUS_MAP) && SUSFS_IS_INODE_SUS_MAP(file_inode(vma->vm_file)))\n\t\t\t\t\tvma->vm_end = last_vma_end;\n\t\t\t\tlast_vma_end = vma->vm_end;\n\t\t\t}/' fs/proc/task_mmu.c
+              perl -i -0pe 's/\t\t\tif \(vma->vm_end > last_vma_end\)\n\t\t\t\tsmap_gather_stats\(vma, \&mss, last_vma_end\);/\t\t\tif (vma->vm_end > last_vma_end) {\n\t\t\t\tsmap_gather_stats(vma, \&mss, last_vma_end);\n\t\t\t\tif (IS_ENABLED(CONFIG_KSU_SUSFS_SUS_MAP) \&\& SUSFS_IS_INODE_SUS_MAP(file_inode(vma->vm_file)))\n\t\t\t\t\tvma->vm_end = last_vma_end;\n\t\t\t\tlast_vma_end = vma->vm_end;\n\t\t\t}/' fs/proc/task_mmu.c
             fi
 
-            # Add nr_subpages declaration if missing
             grep -q 'nr_subpages' fs/proc/task_mmu.c || sed -i '/int ret = 0, copied = 0;/a \\tunsigned int nr_subpages = __PAGE_SIZE / PAGE_SIZE;\n\\tpagemap_entry_t *res = NULL;' fs/proc/task_mmu.c
           fi
+          rm -f susfs.patch
 
-          # KSU-side integration for kernelsu/next
+          # KSU‑side integration – detect the correct KSU source file
           case "$VARIANT" in
-            kernelsu|next)
-              TARGET="KernelSU"
-              [ "$VARIANT" = "next" ] && TARGET="KernelSU-Next"
-              cp -rf susfs4ksu/kernel_patches/KernelSU/kernel/* "$TARGET/kernel/"
-              if grep -q "susfs_init" "$TARGET/kernel/ksu.c"; then
-                echo "SUSFS already integrated in $TARGET"
-              else
-                echo "Injecting SUSFS into $TARGET"
-                sed -i '/#include <linux\/fs\.h>/a #include <linux\/susfs\.h>' "$TARGET/kernel/ksu.c"
-                sed -i '/ksu_core_init();/a \\tsusfs_init();' "$TARGET/kernel/ksu.c" || \
-                sed -i '/ksu_core_init(/a \\tsusfs_init();' "$TARGET/kernel/ksu.c"
-              fi
+            kernelsu)
+              TARGET_FILE="KernelSU/kernel/ksu.c"
+              cp -rf susfs4ksu/kernel_patches/KernelSU/kernel/* KernelSU/kernel/
+              ;;
+            next)
+              TARGET_FILE="KernelSU-Next/kernel/ksu.c"
+              cp -rf susfs4ksu/kernel_patches/KernelSU/kernel/* KernelSU-Next/kernel/
               ;;
             sukisu-ultra|resukisu)
-              # SukiSU/ReSukiSU often already have SUSFS, but ensure
-              if ! grep -q "susfs_init" KernelSU/kernel/ksu.c; then
-                sed -i '/#include <linux\/fs\.h>/a #include <linux\/susfs\.h>' KernelSU/kernel/ksu.c
-                sed -i '/ksu_core_init();/a \\tsusfs_init();' KernelSU/kernel/ksu.c || \
-                sed -i '/ksu_core_init(/a \\tsusfs_init();' KernelSU/kernel/ksu.c
-              fi
+              TARGET_FILE="drivers/kernelsu/ksu.c"
+              ;;
+            *)
+              TARGET_FILE=""
+              echo "Unknown variant – skipping KSU-side integration"
               ;;
           esac
 
-          # Kconfig + Makefile
+          if [ -n "$TARGET_FILE" ] && [ -f "$TARGET_FILE" ]; then
+            if grep -q "susfs_init" "$TARGET_FILE"; then
+              echo "SUSFS already integrated in $TARGET_FILE"
+            else
+              echo "Injecting SUSFS into $TARGET_FILE"
+              sed -i '/#include <linux\/fs\.h>/a #include <linux\/susfs\.h>' "$TARGET_FILE"
+              sed -i '/ksu_core_init();/a \\tsusfs_init();' "$TARGET_FILE" || \
+              sed -i '/ksu_core_init(/a \\tsusfs_init();' "$TARGET_FILE"
+            fi
+          else
+            echo "WARNING: Could not find KSU source file ($TARGET_FILE) – SUSFS may not be fully active"
+          fi
+
           grep -rq "^config KSU_SUSFS" fs/Kconfig 2>/dev/null || \
             printf '\nconfig KSU_SUSFS\n\tbool "KernelSU SuSFS"\n\tdepends on KSU\n\tdefault n\n' >> fs/Kconfig
           grep -q "obj-\$(CONFIG_KSU_SUSFS)" fs/Makefile 2>/dev/null || \
