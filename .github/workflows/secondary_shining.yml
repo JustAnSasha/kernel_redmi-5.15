@@ -286,41 +286,51 @@ jobs:
 
           git clone --depth=1 https://gitlab.com/simonpunk/susfs4ksu.git -b gki-android13-5.15
 
+          # Kernel‑side files + fix unused warnings
           cp susfs4ksu/kernel_patches/fs/susfs.c fs/
           cp susfs4ksu/kernel_patches/include/linux/susfs.h include/linux/
           cp susfs4ksu/kernel_patches/include/linux/susfs_def.h include/linux/
           sed -i '1i #include <linux/cred.h>' include/linux/susfs_def.h
-
-          # Fix unused warnings -> errors
           sed -i 's/size_t copied_size = 0;/size_t __maybe_unused copied_size = 0;/' fs/susfs.c
           sed -i 's/static int copy_config_to_buf/static int __maybe_unused copy_config_to_buf/' fs/susfs.c
 
+          # Apply your custom kernel patch (the 50_)
           curl -Lso susfs.patch \
             "https://raw.githubusercontent.com/ShiningAsStar/extra_kernel_stuff/main/50_add_susfs_in_gki-android13-5.15.patch"
           patch -p1 --forward < susfs.patch
           rm -f susfs.patch
           echo "✅ Custom SUSFS patch applied"
 
-          # Apply KSU‑side integration (all variants need it)
+          # --- KSU‑side integration ---
           case "$VARIANT" in
             kernelsu)
               TARGET="KernelSU"
+              cp -rf susfs4ksu/kernel_patches/KernelSU/kernel/* "$TARGET/kernel/"
+              cd "$TARGET"
+              patch -p1 --forward < ../susfs4ksu/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch || true
+              cd ..
               ;;
             next)
               TARGET="KernelSU-Next"
+              cp -rf susfs4ksu/kernel_patches/KernelSU/kernel/* "$TARGET/kernel/"
+              cd "$TARGET"
+              patch -p1 --forward < ../susfs4ksu/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch || true
+              cd ..
               ;;
             sukisu-ultra|resukisu)
               TARGET="KernelSU"
+              # Copy the SUSFS source files (defines the missing symbols)
+              cp -rf susfs4ksu/kernel_patches/KernelSU/kernel/* "$TARGET/kernel/"
+              # Manually ensure susfs.o is compiled, without patching init.c
+              KBUILD_FILE="$TARGET/kernel/Kbuild"
+              [ -f "$KBUILD_FILE" ] || KBUILD_FILE="$TARGET/kernel/Makefile"
+              if ! grep -q "susfs.o" "$KBUILD_FILE"; then
+                echo 'obj-$(CONFIG_KSU_SUSFS) += susfs.o' >> "$KBUILD_FILE"
+              fi
               ;;
           esac
 
-          if [ -d "susfs4ksu/kernel_patches/KernelSU/kernel" ]; then
-            cp -rf susfs4ksu/kernel_patches/KernelSU/kernel/* "$TARGET/kernel/"
-          fi
-          cd "$TARGET"
-          patch -p1 --forward --fuzz=3 < ../susfs4ksu/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch || true
-          cd ..
-
+          # Kconfig + Makefile for the main kernel (fs/)
           grep -rq "^config KSU_SUSFS" fs/Kconfig 2>/dev/null || \
             printf '\nconfig KSU_SUSFS\n\tbool "KernelSU SuSFS"\n\tdepends on KSU\n\tdefault n\n' >> fs/Kconfig
           grep -q "obj-\$(CONFIG_KSU_SUSFS)" fs/Makefile 2>/dev/null || \
