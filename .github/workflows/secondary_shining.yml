@@ -286,20 +286,17 @@ jobs:
 
           git clone --depth=1 https://gitlab.com/simonpunk/susfs4ksu.git -b gki-android13-5.15
 
-          # Kernel-side files
           cp susfs4ksu/kernel_patches/fs/susfs.c fs/
           cp susfs4ksu/kernel_patches/include/linux/susfs.h include/linux/
           cp susfs4ksu/kernel_patches/include/linux/susfs_def.h include/linux/
           sed -i '1i #include <linux/cred.h>' include/linux/susfs_def.h
 
-          # Apply your custom kernel patch
           curl -Lso susfs.patch \
             "https://raw.githubusercontent.com/ShiningAsStar/extra_kernel_stuff/main/50_add_susfs_in_gki-android13-5.15.patch"
           patch -p1 --forward < susfs.patch
           rm -f susfs.patch
           echo "✅ Custom SUSFS patch applied"
 
-          # KSU-side integration (only for kernelsu/next – Suki/ReSuki already have it from the patch)
           case "$VARIANT" in
             kernelsu)
               cp -rf susfs4ksu/kernel_patches/KernelSU/kernel/* KernelSU/kernel/
@@ -314,20 +311,11 @@ jobs:
               cd ..
               ;;
             sukisu-ultra|resukisu)
-              # Already integrated via the custom patch – verify
-              TARGET="KernelSU/kernel/ksu.c"
-              if grep -q "susfs_init" "$TARGET"; then
-                echo "✅ SUSFS already integrated in $TARGET"
-              else
-                echo "⚠️ susfs_init missing – adding it now"
-                sed -i '/#include <linux\/fs\.h>/a #include <linux\/susfs\.h>' "$TARGET"
-                sed -i '/ksu_core_init();/a \\tsusfs_init();' "$TARGET" || \
-                sed -i '/ksu_core_init(/a \\tsusfs_init();' "$TARGET"
-              fi
+              # Already fully integrated via custom patch – nothing else needed
+              echo "✅ SukiSU/ReSukiSU SUSFS integration is built-in"
               ;;
           esac
 
-          # Kconfig + Makefile (if not already added by patch)
           grep -rq "^config KSU_SUSFS" fs/Kconfig 2>/dev/null || \
             printf '\nconfig KSU_SUSFS\n\tbool "KernelSU SuSFS"\n\tdepends on KSU\n\tdefault n\n' >> fs/Kconfig
           grep -q "obj-\$(CONFIG_KSU_SUSFS)" fs/Makefile 2>/dev/null || \
