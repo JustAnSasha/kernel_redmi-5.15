@@ -286,7 +286,6 @@ jobs:
 
           git clone --depth=1 https://gitlab.com/simonpunk/susfs4ksu.git -b gki-android13-5.15
 
-          # Kernel-side files + fix unused warnings
           cp susfs4ksu/kernel_patches/fs/susfs.c fs/
           cp susfs4ksu/kernel_patches/include/linux/susfs.h include/linux/
           cp susfs4ksu/kernel_patches/include/linux/susfs_def.h include/linux/
@@ -294,19 +293,16 @@ jobs:
           sed -i 's/size_t copied_size = 0;/size_t __maybe_unused copied_size = 0;/' fs/susfs.c
           sed -i 's/static int copy_config_to_buf/static int __maybe_unused copy_config_to_buf/' fs/susfs.c
 
-          # Apply your custom kernel patch (50_)
           curl -Lso susfs.patch \
             "https://raw.githubusercontent.com/ShiningAsStar/extra_kernel_stuff/main/50_add_susfs_in_gki-android13-5.15.patch"
           patch -p1 --forward < susfs.patch || true
           rm -f susfs.patch
 
-          # Undo any patch changes to KSU directories (keep SukiSU/ReSukiSU intact)
           for d in KernelSU KernelSU-Next drivers/kernelsu; do
             [ -d "$d" ] && git checkout -- "$d" 2>/dev/null || true
           done
           echo "✅ Kernel-side patch applied, KSU restored"
 
-          # Create weak stub for any missing symbols (satisfies linker safely)
           cat > KernelSU/kernel/ksu_susfs_stubs.c << 'STUBEOF'
           #include <linux/export.h>
           #include <linux/types.h>
@@ -343,40 +339,42 @@ jobs:
             echo 'obj-$(CONFIG_KSU_SUSFS) += ksu_susfs_stubs.o' >> "$KBUILD"
           fi
 
-          # --- Variant‑specific SUSFS integration ---
           case "$VARIANT" in
             kernelsu|next)
               TARGET_DIR="KernelSU"
               [ "$VARIANT" = "next" ] && TARGET_DIR="KernelSU-Next"
-              # Copy real KSU SUSFS source files
               if [ -d "susfs4ksu/kernel_patches/KernelSU/kernel" ]; then
                 cp -rf susfs4ksu/kernel_patches/KernelSU/kernel/* "$TARGET_DIR/kernel/"
               fi
-              # Apply KSU SUSFS patch (full integration)
               cd "$TARGET_DIR"
               patch -p1 --forward < ../susfs4ksu/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch || true
               cd ..
               ;;
             sukisu-ultra|resukisu)
               echo "SukiSU/ReSukiSU: adding real SUSFS source files"
-              # Copy real KSU SUSFS source files (overwrites the stubs with real code)
               if [ -d "susfs4ksu/kernel_patches/KernelSU/kernel" ]; then
                 cp -rf susfs4ksu/kernel_patches/KernelSU/kernel/* KernelSU/kernel/
               fi
-              # Ensure susfs.o is compiled in KSU
               if ! grep -q 'susfs.o' "$KBUILD"; then
                 echo 'obj-$(CONFIG_KSU_SUSFS) += susfs.o' >> "$KBUILD"
               fi
-              # Manually add susfs_init() call if not already there
-              if ! grep -q "susfs_init" KernelSU/kernel/ksu.c; then
-                sed -i '/#include <linux\/fs\.h>/a #include <linux\/susfs\.h>' KernelSU/kernel/ksu.c
-                sed -i '/ksu_core_init();/a \\tsusfs_init();' KernelSU/kernel/ksu.c || \
-                sed -i '/ksu_core_init(/a \\tsusfs_init();' KernelSU/kernel/ksu.c
+
+              # Find the actual KSU init file
+              KSU_INIT=$(find drivers/kernelsu KernelSU -name "*.c" -exec grep -l "ksu_core_init" {} \; 2>/dev/null | head -1)
+              if [ -z "$KSU_INIT" ]; then
+                echo "WARNING: could not find KSU init file – SUSFS may not activate"
+              else
+                echo "Found KSU init file: $KSU_INIT"
+                if ! grep -q "susfs_init" "$KSU_INIT"; then
+                  sed -i '/#include <linux\/fs\.h>/a #include <linux\/susfs\.h>' "$KSU_INIT"
+                  sed -i '/ksu_core_init();/a \\tsusfs_init();' "$KSU_INIT" || \
+                  sed -i '/ksu_core_init(/a \\tsusfs_init();' "$KSU_INIT"
+                  echo "✅ Injected susfs_init() into $KSU_INIT"
+                fi
               fi
               ;;
           esac
 
-          # Kernel-side Kconfig + Makefile (fs/)
           grep -rq "^config KSU_SUSFS" fs/Kconfig 2>/dev/null || \
             printf '\nconfig KSU_SUSFS\n\tbool "KernelSU SuSFS"\n\tdepends on KSU\n\tdefault n\n' >> fs/Kconfig
           grep -q "obj-\$(CONFIG_KSU_SUSFS)" fs/Makefile 2>/dev/null || \
