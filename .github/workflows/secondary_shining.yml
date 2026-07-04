@@ -291,8 +291,9 @@ jobs:
           cp susfs4ksu/kernel_patches/include/linux/susfs_def.h include/linux/
           sed -i '1i #include <linux/cred.h>' include/linux/susfs_def.h
 
-          # Fix unused variable warning that becomes error
-          sed -i 's/size_t copied_size = 0;/size_t copied_size __maybe_unused = 0;/' fs/susfs.c
+          # Fix unused warnings that are errors
+          sed -i 's/size_t copied_size = 0;/size_t __maybe_unused copied_size = 0;/' fs/susfs.c
+          sed -i 's/static int copy_config_to_buf/static int __maybe_unused copy_config_to_buf/' fs/susfs.c
 
           curl -Lso susfs.patch \
             "https://raw.githubusercontent.com/ShiningAsStar/extra_kernel_stuff/main/50_add_susfs_in_gki-android13-5.15.patch"
