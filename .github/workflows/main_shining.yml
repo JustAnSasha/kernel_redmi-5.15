@@ -207,7 +207,7 @@ jobs:
             fi
             rm -f "$file"
           }
-          apply_patch "https://raw.githubusercontent.com/ShiningAsStar/extra_stuff/main/custom-tickrate-options.patch"
+          apply_patch "https://raw.githubusercontent.com/ShiningAsStar/extra_kernel_stuff/main/custom-tickrate-options.patch"
           find . -name "*.rej" -delete
           sed -i '/CONFIG_CC_OPTIMIZE_FOR_PERFORMANCE\b/d; /CONFIG_CC_OPTIMIZE_FOR_PERFORMANCE_O3/d; /CONFIG_CC_OPTIMIZE_FOR_SIZE/d' "$CONFIG_FILE"
           case "${{ github.event.inputs.optimizationLevel }}" in
