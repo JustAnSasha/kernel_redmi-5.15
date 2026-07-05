@@ -263,6 +263,8 @@ jobs:
           set -e
 
           VARIANT="${{ github.event.inputs.ksuVariant }}"
+          SUSFS="${{ github.event.inputs.SUSFS }}"
+
           rm -rf KernelSU KernelSU-Next drivers/kernelsu
 
           case "$VARIANT" in
@@ -270,13 +272,17 @@ jobs:
               curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -s main
               ;;
             sukisu-ultra)
-              curl -LSs "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh" | bash -s main
+              if [ "$SUSFS" = "true" ]; then
+                curl -LSs "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh" | bash -s builtin
+              else
+                curl -LSs "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh" | bash -s main
+              fi
               ;;
             resukisu)
               curl -LSs "https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/main/kernel/setup.sh" | bash -s main
               ;;
             next)
-              curl -LSs "https://raw.githubusercontent.com/pershoot/KernelSU-Next/dev-susfs/kernel/setup.sh" | bash -s dev-susfs
+              curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/refs/heads/dev/kernel/setup.sh" | bash -s dev-susfs
               ;;
           esac
 
@@ -326,6 +332,8 @@ jobs:
                   sed -i 's|kernel/Makefile|kernel/Kbuild|g' 10_enable_susfs_for_ksu.patch
                 fi
                 patch -p1 --forward --fuzz=3 < 10_enable_susfs_for_ksu.patch || true
+                grep -q "KSU_SUSFS" kernel/Kconfig
+                grep -q "susfs" kernel/Kbuild
                 cd ..
               fi
               ;;
@@ -346,6 +354,7 @@ jobs:
         run: |
           set -e
 
+          VARIANT="${{ github.event.inputs.ksuVariant }}"
           SUSFS="${{ github.event.inputs.SUSFS }}"
           CONFIG_FILE="arch/arm64/configs/${{ env.DEFCONFIG_NAME }}"
 
@@ -363,6 +372,13 @@ jobs:
           EOF
 
           if [ "$SUSFS" = "true" ]; then
+            if [ "$VARIANT" = "resukisu" ]; then
+              cat >> "$CONFIG_FILE" << 'EOF'
+          # CONFIG_KSU_TRACEPOINT_HOOK is not set
+          # CONFIG_KSU_MANUAL_HOOK is not set
+          EOF
+            fi
+
             cat >> "$CONFIG_FILE" << 'EOF'
           CONFIG_KSU_SUSFS=y
           CONFIG_KSU_SUSFS_HAS_MAGIC_MOUNT=y
