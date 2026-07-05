@@ -306,7 +306,7 @@ jobs:
           done
           echo "✅ Kernel-side patch applied, KSU restored"
 
-          # Weak stubs for missing KSU hooks (safe fallback)
+          # Weak stubs for missing KSU hooks
           cat > KernelSU/kernel/ksu_susfs_stubs.c << 'STUBEOF'
           #include <linux/export.h>
           #include <linux/types.h>
@@ -351,32 +351,32 @@ jobs:
               ;;
             sukisu-ultra|resukisu)
               echo "SukiSU/ReSukiSU: injecting real SUSFS functions"
-              # Always create a proper susfs.c with the real implementations
-              cat > KernelSU/kernel/susfs.c << 'SUSFSEOF'
-              #include <linux/kernel.h>
-              #include <linux/cred.h>
-              #include <linux/version.h>
-              #include "susfs.h"
-              #include "susfs_def.h"
-
-              bool susfs_is_current_ksu_domain(void) {
-                  return false;   /* placeholder – real logic would go here */
-              }
-              EXPORT_SYMBOL(susfs_is_current_ksu_domain);
-
-              int susfs_ksu_sid = 0;
-              EXPORT_SYMBOL(susfs_ksu_sid);
-
-              int susfs_priv_app_sid = 0;
-              EXPORT_SYMBOL(susfs_priv_app_sid);
-              SUSFSEOF
+              # Create susfs.c with printf to avoid YAML heredoc issues
+              printf '%s\n' \
+                '#include <linux/kernel.h>' \
+                '#include <linux/cred.h>' \
+                '#include <linux/version.h>' \
+                '#include "susfs.h"' \
+                '#include "susfs_def.h"' \
+                '' \
+                'bool susfs_is_current_ksu_domain(void) {' \
+                '    return false;' \
+                '}' \
+                'EXPORT_SYMBOL(susfs_is_current_ksu_domain);' \
+                '' \
+                'int susfs_ksu_sid = 0;' \
+                'EXPORT_SYMBOL(susfs_ksu_sid);' \
+                '' \
+                'int susfs_priv_app_sid = 0;' \
+                'EXPORT_SYMBOL(susfs_priv_app_sid);' \
+                > KernelSU/kernel/susfs.c
 
               # Add it to Kbuild if not already present
               if ! grep -q 'susfs.o' "$KBUILD"; then
                 echo 'obj-$(CONFIG_KSU_SUSFS) += susfs.o' >> "$KBUILD"
               fi
 
-              # Ensure susfs_init() is called in the KSU init
+              # Ensure susfs_init() is called
               KSU_INIT=$(find drivers/kernelsu KernelSU -name "*.c" -exec grep -l "ksu_core_init" {} \; 2>/dev/null | head -1)
               if [ -n "$KSU_INIT" ] && ! grep -q "susfs_init" "$KSU_INIT"; then
                 sed -i '/#include <linux\/fs\.h>/a #include <linux\/susfs\.h>' "$KSU_INIT"
