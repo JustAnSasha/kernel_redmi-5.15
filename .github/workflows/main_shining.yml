@@ -272,11 +272,7 @@ jobs:
               curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -s main
               ;;
             sukisu-ultra)
-              if [ "$SUSFS" = "true" ]; then
-                curl -LSs "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh" | bash -s builtin
-              else
-                curl -LSs "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh" | bash -s main
-              fi
+              curl -LSs "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh" | bash -s main
               ;;
             resukisu)
               curl -LSs "https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/main/kernel/setup.sh" | bash -s main
@@ -296,6 +292,16 @@ jobs:
           set -e
 
           VARIANT="${{ github.event.inputs.ksuVariant }}"
+
+          ksu_build_file() {
+            if [ -f "$1/kernel/Kbuild" ]; then
+              printf '%s\n' "$1/kernel/Kbuild"
+            elif [ -f "$1/kernel/Makefile" ]; then
+              printf '%s\n' "$1/kernel/Makefile"
+            else
+              printf '%s\n' ""
+            fi
+          }
 
           rm -rf susfs4ksu
           git clone --depth=1 https://gitlab.com/simonpunk/susfs4ksu.git -b gki-android13-5.15
@@ -324,33 +330,53 @@ jobs:
           fi
 
           case "$VARIANT" in
-            kernelsu)
+            kernelsu|sukisu-ultra)
               if [ -f "susfs4ksu/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch" ]; then
                 cp -f susfs4ksu/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch KernelSU/
                 cd KernelSU
+                KSU_BUILD_FILE="$(if [ -f kernel/Kbuild ]; then printf '%s\n' kernel/Kbuild; elif [ -f kernel/Makefile ]; then printf '%s\n' kernel/Makefile; else printf '%s\n' ""; fi)"
+                if [ -z "$KSU_BUILD_FILE" ]; then
+                  echo "::error::KernelSU build file missing"
+                  exit 1
+                fi
                 if [ -f kernel/Kbuild ]; then
                   sed -i 's|kernel/Makefile|kernel/Kbuild|g' 10_enable_susfs_for_ksu.patch
                 fi
-                patch -p1 --forward --fuzz=3 < 10_enable_susfs_for_ksu.patch
+                if patch -p1 --forward --fuzz=3 < 10_enable_susfs_for_ksu.patch; then
+                  echo "$VARIANT SUSFS patch applied"
+                elif grep -q "KSU_SUSFS" kernel/Kconfig && grep -q "susfs" "$KSU_BUILD_FILE"; then
+                  echo "$VARIANT SUSFS patch already applied"
+                  find . -name "*.rej" -delete
+                else
+                  echo "::error::$VARIANT SUSFS patch failed"
+                  find . -name "*.rej" -exec echo "=== {} ===" \; -exec cat {} \;
+                  exit 1
+                fi
                 grep -q "KSU_SUSFS" kernel/Kconfig
-                grep -q "susfs" kernel/Kbuild
+                grep -q "susfs" "$KSU_BUILD_FILE"
                 cd ..
               else
-                echo "::error::KernelSU SUSFS patch missing"
+                echo "::error::$VARIANT SUSFS patch missing"
                 exit 1
               fi
               ;;
-            sukisu-ultra)
-              grep -q "KSU_SUSFS" KernelSU/kernel/Kconfig
-              grep -q "SUSFS" KernelSU/kernel/Kbuild
-              ;;
             resukisu)
+              RESU_BUILD_FILE="$(ksu_build_file KernelSU)"
+              if [ -z "$RESU_BUILD_FILE" ]; then
+                echo "::error::ReSukiSU build file missing"
+                exit 1
+              fi
               grep -q "KSU_SUSFS" KernelSU/kernel/Kconfig
               grep -q "susfs_init" KernelSU/kernel/core/init.c
               ;;
             next)
+              NEXT_BUILD_FILE="$(ksu_build_file KernelSU-Next)"
+              if [ -z "$NEXT_BUILD_FILE" ]; then
+                echo "::error::KernelSU-Next build file missing"
+                exit 1
+              fi
               grep -q "KSU_SUSFS" KernelSU-Next/kernel/Kconfig
-              grep -q "susfs" KernelSU-Next/kernel/Kbuild
+              grep -q "SUSFS\|susfs" "$NEXT_BUILD_FILE"
               ;;
           esac
 
