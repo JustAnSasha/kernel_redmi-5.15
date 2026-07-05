@@ -271,11 +271,7 @@ jobs:
               curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -s main
               ;;
             sukisu-ultra)
-              if [ "$SUSFS" = "true" ]; then
-                curl -LSs "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh" | bash -s susfs-gki-android13-5.15
-              else
-                curl -LSs "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh" | bash -s main
-              fi
+              curl -LSs "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh" | bash -s main
               ;;
             resukisu)
               curl -LSs "https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/main/kernel/setup.sh" | bash -s main
@@ -285,39 +281,40 @@ jobs:
               ;;
           esac
 
-          if [ "$SUSFS" = "true" ] && [ "$VARIANT" != "sukisu-ultra" ]; then
+          if [ "$SUSFS" = "true" ]; then
             git clone --depth=1 https://gitlab.com/simonpunk/susfs4ksu.git -b gki-android13-5.15
-            curl -LSs "https://raw.githubusercontent.com/ShiningAsStar/extra_kernel_stuff/main/50_add_susfs_in_gki-android13-5.15.patch" \
-              | patch -p1 --forward || true
+
+            curl -Lso susfs_kernel.patch \
+              "https://raw.githubusercontent.com/ShiningAsStar/extra_kernel_stuff/main/50_add_susfs_in_gki-android13-5.15.patch"
+            patch -p1 --forward < susfs_kernel.patch || true
+            rm -f susfs_kernel.patch
 
             mkdir -p fs include/linux
             cp -f susfs4ksu/kernel_patches/fs/susfs.c fs/susfs.c
             cp -f susfs4ksu/kernel_patches/include/linux/susfs.h include/linux/susfs.h
             cp -f susfs4ksu/kernel_patches/include/linux/susfs_def.h include/linux/susfs_def.h
-
-            grep -q "#include <linux/cred.h>" include/linux/susfs_def.h || \
-              sed -i '1i #include <linux/cred.h>' include/linux/susfs_def.h
+            sed -i '1i #include <linux/cred.h>' include/linux/susfs_def.h
 
             case "$VARIANT" in
               kernelsu)
-                [ -d susfs4ksu/kernel_patches/KernelSU/kernel ] && \
-                  cp -rf susfs4ksu/kernel_patches/KernelSU/kernel/* KernelSU/kernel/
-                patch -p1 -d KernelSU --forward --fuzz=3 \
-                  < susfs4ksu/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch || true
+                cp -rf susfs4ksu/kernel_patches/KernelSU/kernel/* KernelSU/kernel/
+                cd KernelSU
+                patch -p1 --forward --fuzz=3 < ../susfs4ksu/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch || true
+                cd ..
                 ;;
               next)
-                [ -d susfs4ksu/kernel_patches/KernelSU/kernel ] && \
-                  cp -rf susfs4ksu/kernel_patches/KernelSU/kernel/* KernelSU-Next/kernel/
-                patch -p1 -d KernelSU-Next --forward --fuzz=3 \
-                  < susfs4ksu/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch || true
+                cp -rf susfs4ksu/kernel_patches/KernelSU/kernel/* KernelSU-Next/kernel/
+                cd KernelSU-Next
+                patch -p1 --forward --fuzz=3 < ../susfs4ksu/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch || true
+                cd ..
                 ;;
-              resukisu)
+              sukisu-ultra|resukisu)
+                echo "SUSFS already integrated"
                 ;;
             esac
 
-            grep -rq "^config KSU_SUSFS" --include=Kconfig . 2>/dev/null || \
+            grep -rq "^config KSU_SUSFS" fs/Kconfig 2>/dev/null || \
               printf '\nconfig KSU_SUSFS\n\tbool "KernelSU SuSFS"\n\tdepends on KSU\n\tdefault n\n' >> fs/Kconfig
-
             grep -q "obj-\$(CONFIG_KSU_SUSFS)" fs/Makefile 2>/dev/null || \
               printf '\nobj-$(CONFIG_KSU_SUSFS) += susfs.o\n' >> fs/Makefile
 
@@ -327,7 +324,6 @@ jobs:
           CONFIG_FILE="arch/arm64/configs/${{ env.DEFCONFIG_NAME }}"
           sed -i '/^CONFIG_KSU_SUSFS/d; /^CONFIG_KSU=/d' "$CONFIG_FILE"
           printf 'CONFIG_KSU=y\nCONFIG_OVERLAY_FS=y\n' >> "$CONFIG_FILE"
-
           if [ "$SUSFS" = "true" ]; then
             cat >> "$CONFIG_FILE" << 'EOF'
           CONFIG_KSU_SUSFS=y
