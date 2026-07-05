@@ -306,6 +306,10 @@ jobs:
           done
           echo "✅ Kernel-side patch applied, KSU restored"
 
+          # Copy SUSFS headers into KSU kernel directory (so susfs.c finds them)
+          cp include/linux/susfs.h KernelSU/kernel/susfs.h
+          cp include/linux/susfs_def.h KernelSU/kernel/susfs_def.h
+
           # Weak stubs for missing KSU hooks
           cat > KernelSU/kernel/ksu_susfs_stubs.c << 'STUBEOF'
           #include <linux/export.h>
@@ -345,13 +349,16 @@ jobs:
               TARGET_DIR="KernelSU"
               [ "$VARIANT" = "next" ] && TARGET_DIR="KernelSU-Next"
               cp -rf susfs4ksu/kernel_patches/KernelSU/kernel/* "$TARGET_DIR/kernel/" 2>/dev/null || true
+              # Also copy headers into TARGET_DIR/kernel/
+              cp include/linux/susfs.h "$TARGET_DIR/kernel/susfs.h"
+              cp include/linux/susfs_def.h "$TARGET_DIR/kernel/susfs_def.h"
               cd "$TARGET_DIR"
               patch -p1 --forward < ../susfs4ksu/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch || true
               cd ..
               ;;
             sukisu-ultra|resukisu)
               echo "SukiSU/ReSukiSU: injecting real SUSFS functions"
-              # Create susfs.c with printf to avoid YAML heredoc issues
+              # Create a proper susfs.c (uses headers now present)
               printf '%s\n' \
                 '#include <linux/kernel.h>' \
                 '#include <linux/cred.h>' \
@@ -371,12 +378,10 @@ jobs:
                 'EXPORT_SYMBOL(susfs_priv_app_sid);' \
                 > KernelSU/kernel/susfs.c
 
-              # Add it to Kbuild if not already present
               if ! grep -q 'susfs.o' "$KBUILD"; then
                 echo 'obj-$(CONFIG_KSU_SUSFS) += susfs.o' >> "$KBUILD"
               fi
 
-              # Ensure susfs_init() is called
               KSU_INIT=$(find drivers/kernelsu KernelSU -name "*.c" -exec grep -l "ksu_core_init" {} \; 2>/dev/null | head -1)
               if [ -n "$KSU_INIT" ] && ! grep -q "susfs_init" "$KSU_INIT"; then
                 sed -i '/#include <linux\/fs\.h>/a #include <linux\/susfs\.h>' "$KSU_INIT"
