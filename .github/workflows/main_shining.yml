@@ -263,32 +263,25 @@ jobs:
           set -e
 
           VARIANT="${{ github.event.inputs.ksuVariant }}"
-          SUSFS="${{ github.event.inputs.SUSFS }}"
-
           rm -rf KernelSU KernelSU-Next drivers/kernelsu
 
           case "$VARIANT" in
             kernelsu)
               curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -s main
-              echo "KSU_DIR=KernelSU" >> "$GITHUB_ENV"
               ;;
             sukisu-ultra)
-              if [ "$SUSFS" = "true" ]; then
-                curl -LSs "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh" | bash -s builtin
-              else
-                curl -LSs "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh" | bash -s main
-              fi
-              echo "KSU_DIR=KernelSU" >> "$GITHUB_ENV"
+              curl -LSs "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh" | bash -s main
               ;;
             resukisu)
               curl -LSs "https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/main/kernel/setup.sh" | bash -s main
-              echo "KSU_DIR=KernelSU" >> "$GITHUB_ENV"
               ;;
             next)
               curl -LSs "https://raw.githubusercontent.com/pershoot/KernelSU-Next/dev-susfs/kernel/setup.sh" | bash -s dev-susfs
-              echo "KSU_DIR=KernelSU-Next" >> "$GITHUB_ENV"
               ;;
           esac
+
+          grep -q 'obj-$(CONFIG_KSU) += kernelsu/' drivers/Makefile
+          grep -q 'source "drivers/kernelsu/Kconfig"' drivers/Kconfig
 
       - name: "🧩 Setup SUSFS"
         if: matrix.variant == 'ksu' && github.event.inputs.SUSFS == 'true'
@@ -307,7 +300,6 @@ jobs:
           cp -f susfs4ksu/kernel_patches/include/linux/susfs_def.h include/linux/susfs_def.h
 
           grep -q "#include <linux/cred.h>" include/linux/susfs_def.h || sed -i '1i #include <linux/cred.h>' include/linux/susfs_def.h
-
           sed -i 's/size_t copied_size = 0;/size_t __maybe_unused copied_size = 0;/' fs/susfs.c
           sed -i 's/static int copy_config_to_buf/static int __maybe_unused copy_config_to_buf/' fs/susfs.c
 
@@ -327,10 +319,6 @@ jobs:
 
           case "$VARIANT" in
             kernelsu)
-              if [ -d "susfs4ksu/kernel_patches/KernelSU/kernel" ]; then
-                cp -rf susfs4ksu/kernel_patches/KernelSU/kernel/. KernelSU/kernel/
-              fi
-
               if [ -f "susfs4ksu/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch" ]; then
                 cp -f susfs4ksu/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch KernelSU/
                 cd KernelSU
@@ -341,7 +329,7 @@ jobs:
                 cd ..
               fi
               ;;
-            next|sukisu-ultra|resukisu)
+            sukisu-ultra|resukisu|next)
               echo "$VARIANT uses built-in KSU-side SUSFS support"
               ;;
           esac
@@ -398,6 +386,7 @@ jobs:
       - name: "🔨 Compile kernel"
         working-directory: ${{ env.WORK_DIR }}
         run: |
+          export KCFLAGS="${KCFLAGS:-} -Wno-error=unused-variable -Wno-error=unused-label"
           export PATH=$CLANG_PATH/bin:$PATH
           export KBUILD_BUILD_USER=ShiningAsStar
           export KBUILD_BUILD_HOST=GitHub
