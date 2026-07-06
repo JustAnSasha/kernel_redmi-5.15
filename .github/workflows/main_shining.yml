@@ -307,7 +307,7 @@ jobs:
           if [ "$VARIANT" = "sukisu-ultra" ]; then
             curl -Lso sukisu_fix.patch \
               "https://raw.githubusercontent.com/ShiningAsStar/extra_kernel_stuff/main/fix_sukisu_susfs_implementation.patch"
-            patch -p1 --forward < sukisu_fix.patch || true
+            git apply --whitespace=nowarn sukisu_fix.patch || true
             rm -f sukisu_fix.patch
           fi
 
