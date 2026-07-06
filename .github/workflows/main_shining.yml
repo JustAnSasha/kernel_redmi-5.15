@@ -285,6 +285,46 @@ jobs:
           grep -q 'obj-$(CONFIG_KSU) += kernelsu/' drivers/Makefile
           grep -q 'source "drivers/kernelsu/Kconfig"' drivers/Kconfig
 
+      - name: "🧩 Setup SUSFS"
+        if: matrix.variant == 'ksu' && github.event.inputs.SUSFS == 'true'
+        working-directory: ./${{ env.kernelDir }}/${{ env.kernelName }}
+        run: |
+          set -e
+          VARIANT="${{ github.event.inputs.ksuVariant }}"
+
+          git clone --depth=1 https://gitlab.com/simonpunk/susfs4ksu.git -b gki-android13-5.15 susfs
+
+          mkdir -p include/linux fs
+          cp -f susfs/kernel_patches/include/linux/susfs.h include/linux/
+          cp -f susfs/kernel_patches/include/linux/susfs_def.h include/linux/
+          cp -f susfs/kernel_patches/fs/susfs.c fs/
+
+          curl -Lso susfs_kernel.patch \
+            "https://raw.githubusercontent.com/ShiningAsStar/extra_kernel_stuff/main/50_add_susfs_in_gki-android13-5.15.patch"
+          patch -p1 --forward < susfs_kernel.patch || true
+          rm -f susfs_kernel.patch
+
+          if [ "$VARIANT" = "sukisu-ultra" ]; then
+            curl -Lso sukisu_fix.patch \
+              "https://raw.githubusercontent.com/ShiningAsStar/extra_kernel_stuff/main/fix_sukisu_susfs_implementation.patch"
+            patch -p1 --forward < sukisu_fix.patch
+            rm -f sukisu_fix.patch
+          fi
+
+          case "$VARIANT" in
+            kernelsu)
+              cd KernelSU
+              if [ -f kernel/Kbuild ]; then
+                sed -i 's|kernel/Makefile|kernel/Kbuild|g' ../susfs/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch
+              fi
+              patch -p1 --forward --fuzz=3 < ../susfs/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch || true
+              cd ..
+              ;;
+            next)
+              cd KernelSU-Next
+              patch -p1 --forward --fuzz=3 < ../susfs/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch || true
+              cd ..
+              ;;
             sukisu-ultra)
               KSU_DIR="KernelSU/kernel"
               # 1. Create minimal SUSFS KSU-side source (provides the three real SUSFS symbols)
@@ -342,6 +382,17 @@ jobs:
                 echo 'obj-$(CONFIG_KSU_SUSFS) += ksu_susfs_stubs.o' >> "$KBUILD"
               fi
               ;;
+            resukisu)
+              # Already has SUSFS built-in – nothing needed
+              ;;
+          esac
+
+          grep -rq "^config KSU_SUSFS" fs/Kconfig 2>/dev/null || \
+            printf '\nconfig KSU_SUSFS\n\tbool "KernelSU SuSFS"\n\tdepends on KSU\n\tdefault n\n' >> fs/Kconfig
+          grep -q "obj-\$(CONFIG_KSU_SUSFS)" fs/Makefile 2>/dev/null || \
+            printf '\nobj-$(CONFIG_KSU_SUSFS) += susfs.o\n' >> fs/Makefile
+
+          rm -rf susfs
 
       - name: "⚙️ Configure KernelSU"
         if: matrix.variant == 'ksu'
