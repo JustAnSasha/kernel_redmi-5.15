@@ -307,11 +307,7 @@ jobs:
           if [ "$VARIANT" = "sukisu-ultra" ]; then
             curl -Lso sukisu_fix.patch \
               "https://raw.githubusercontent.com/ShiningAsStar/extra_kernel_stuff/main/fix_sukisu_susfs_implementation.patch"
-            patch -p1 --forward --fuzz=3 < sukisu_fix.patch || {
-              echo "Patch failed, trying fallback..."
-              sed -i 's/^static int copy_config_to_buf/static int __maybe_unused copy_config_to_buf/' fs/susfs.c
-              sed -i 's/^\t\?size_t copied_size = 0;/\t\?size_t __maybe_unused copied_size = 0;/' fs/susfs.c
-            }
+            patch -p1 --forward < sukisu_fix.patch
             rm -f sukisu_fix.patch
           fi
 
