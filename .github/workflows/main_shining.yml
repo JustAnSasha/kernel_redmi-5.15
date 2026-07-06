@@ -304,9 +304,15 @@ jobs:
           patch -p1 --forward < susfs_kernel.patch || true
           rm -f susfs_kernel.patch
 
+          if [ "$VARIANT" = "sukisu-ultra" ]; then
+            curl -Lso sukisu_fix.patch \
+              "https://raw.githubusercontent.com/ShiningAsStar/extra_kernel_stuff/main/fix_sukisu_susfs_implementation.patch"
+            patch -p1 --forward < sukisu_fix.patch || true
+            rm -f sukisu_fix.patch
+          fi
+
           case "$VARIANT" in
             kernelsu)
-              cp -rf susfs/kernel_patches/KernelSU/kernel/* KernelSU/kernel/
               cd KernelSU
               if [ -f kernel/Kbuild ]; then
                 sed -i 's|kernel/Makefile|kernel/Kbuild|g' ../susfs/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch
@@ -315,24 +321,11 @@ jobs:
               cd ..
               ;;
             next)
-              cp -rf susfs/kernel_patches/KernelSU/kernel/* KernelSU-Next/kernel/
               cd KernelSU-Next
               patch -p1 --forward --fuzz=3 < ../susfs/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch || true
               cd ..
               ;;
             sukisu-ultra|resukisu)
-              cp -rf susfs/kernel_patches/KernelSU/kernel/* KernelSU/kernel/
-              KSU_BUILD_FILE="KernelSU/kernel/Kbuild"
-              [ -f "$KSU_BUILD_FILE" ] || KSU_BUILD_FILE="KernelSU/kernel/Makefile"
-              if ! grep -q 'susfs.o' "$KSU_BUILD_FILE"; then
-                echo 'obj-$(CONFIG_KSU_SUSFS) += susfs.o' >> "$KSU_BUILD_FILE"
-              fi
-              KSU_INIT=$(find KernelSU -name "*.c" -exec grep -l "ksu_core_init" {} \; 2>/dev/null | head -1)
-              if [ -n "$KSU_INIT" ] && ! grep -q "susfs_init" "$KSU_INIT"; then
-                sed -i '/#include <linux\/fs\.h>/a #include <linux\/susfs\.h>' "$KSU_INIT"
-                sed -i '/ksu_core_init();/a \\tsusfs_init();' "$KSU_INIT" || \
-                sed -i '/ksu_core_init(/a \\tsusfs_init();' "$KSU_INIT"
-              fi
               ;;
           esac
 
