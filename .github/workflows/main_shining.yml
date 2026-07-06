@@ -381,6 +381,23 @@ jobs:
               if ! grep -q 'ksu_susfs_stubs.o' "$KBUILD"; then
                 echo 'obj-$(CONFIG_KSU_SUSFS) += ksu_susfs_stubs.o' >> "$KBUILD"
               fi
+
+              # 4. Inject susfs_init() call into SukiSU's init
+              INIT_FILE="$KSU_DIR/core/init.c"
+              if [ -f "$INIT_FILE" ]; then
+                # Add include if needed
+                if ! grep -q '<linux/susfs.h>' "$INIT_FILE"; then
+                  sed -i '/#include <linux\/fs\.h>/a #include <linux\/susfs.h>' "$INIT_FILE"
+                fi
+                # Add susfs_init() call right after ksu_core_init()
+                if ! grep -q 'susfs_init()' "$INIT_FILE"; then
+                  sed -i '/ksu_core_init();/a \\tsusfs_init();' "$INIT_FILE" || \
+                  sed -i '/ksu_core_init(/a \\tsusfs_init();' "$INIT_FILE"
+                fi
+                echo "✅ SUSFS init injected into $INIT_FILE"
+              else
+                echo "⚠️ Could not find $INIT_FILE – SUSFS may not be enabled"
+              fi
               ;;
             resukisu)
               # Already has SUSFS built-in – nothing needed
