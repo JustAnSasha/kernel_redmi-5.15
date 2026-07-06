@@ -132,12 +132,7 @@ jobs:
           mkdir -p $kernelDir
           echo "BUILD_TIME=$(date +'%Y-%m-%d')" >> $GITHUB_ENV
           sudo apt-get update -qq
-          # Install essential build and cross-compilation tools so clang can link and kernel build helpers exist
-          sudo apt-get install -y --no-install-recommends \
-            repo rsync aria2 \
-            build-essential binutils lld \
-            binutils-aarch64-linux-gnu gcc-aarch64-linux-gnu crossbuild-essential-arm64 \
-            libc6-dev-arm64-cross device-tree-compiler bc libssl-dev libncurses-dev
+          sudo apt-get install -y repo rsync aria2
 
       - name: "🧹 Free up disk space"
         run: |
@@ -326,11 +321,11 @@ jobs:
 
           if grep -q 'SUSFS_IS_INODE_SUS_MAP\|SUSFS_IS_INODE_OPEN_REDIRECT' fs/proc/task_mmu.c && ! grep -qF '#include <linux/susfs_def.h>' fs/proc/task_mmu.c; then
             if grep -qF '#include <linux/pkeys.h>' fs/proc/task_mmu.c; then
-              sed -i '/#include <linux\/pkeys.h>/a #if defined(CONFIG_KSU_SUSFS_SUS_KSTAT) || defined(CONFIG_KSU_SUSFS_SUS_MAP) || defined(CONFIG_KSU_SUSFS_OPEN_REDIRECT)\n#include <linux\/susfs_[...]'
+              sed -i '/#include <linux\/pkeys.h>/a #if defined(CONFIG_KSU_SUSFS_SUS_KSTAT) || defined(CONFIG_KSU_SUSFS_SUS_MAP) || defined(CONFIG_KSU_SUSFS_OPEN_REDIRECT)\n#include <linux\/susfs_def.h>\n#endif' fs/proc/task_mmu.c
             elif grep -qF '#include <linux/uaccess.h>' fs/proc/task_mmu.c; then
-              sed -i '/#include <linux\/uaccess.h>/a #if defined(CONFIG_KSU_SUSFS_SUS_KSTAT) || defined(CONFIG_KSU_SUSFS_SUS_MAP) || defined(CONFIG_KSU_SUSFS_OPEN_REDIRECT)\n#include <linux\/susf[...]'
+              sed -i '/#include <linux\/uaccess.h>/a #if defined(CONFIG_KSU_SUSFS_SUS_KSTAT) || defined(CONFIG_KSU_SUSFS_SUS_MAP) || defined(CONFIG_KSU_SUSFS_OPEN_REDIRECT)\n#include <linux\/susfs_def.h>\n#endif' fs/proc/task_mmu.c
             else
-              sed -i '0,/^#include /s//#if defined(CONFIG_KSU_SUSFS_SUS_KSTAT) || defined(CONFIG_KSU_SUSFS_SUS_MAP) || defined(CONFIG_KSU_SUSFS_OPEN_REDIRECT)\n#include <linux\/susfs_def.h>\n#end[...]'
+              sed -i '0,/^#include /s//#if defined(CONFIG_KSU_SUSFS_SUS_KSTAT) || defined(CONFIG_KSU_SUSFS_SUS_MAP) || defined(CONFIG_KSU_SUSFS_OPEN_REDIRECT)\n#include <linux\/susfs_def.h>\n#endif\n&/' fs/proc/task_mmu.c
             fi
           fi
 
@@ -386,7 +381,7 @@ jobs:
           esac
 
           grep -rq "^config KSU_SUSFS" fs/Kconfig 2>/dev/null || printf '\nconfig KSU_SUSFS\n\tbool "KernelSU SuSFS"\n\tdepends on KSU\n\tdefault n\n' >> fs/Kconfig
-          grep -q "obj-$(CONFIG_KSU_SUSFS)" fs/Makefile 2>/dev/null || printf '\nobj-$(CONFIG_KSU_SUSFS) += susfs.o\n' >> fs/Makefile
+          grep -q "obj-\$(CONFIG_KSU_SUSFS)" fs/Makefile 2>/dev/null || printf '\nobj-$(CONFIG_KSU_SUSFS) += susfs.o\n' >> fs/Makefile
 
           find . -name "*.rej" -delete
           rm -rf susfs4ksu
@@ -447,11 +442,9 @@ jobs:
         run: |
           export KCFLAGS="${KCFLAGS:-} -Wno-error=unused-variable -Wno-error=unused-label"
           export PATH=$CLANG_PATH/bin:$PATH
-          # Prefer LLD as the linker; ensure it's on PATH from the installed packages
-          export LD=ld.lld
           export KBUILD_BUILD_USER=ShiningAsStar
           export KBUILD_BUILD_HOST=GitHub
-          BUILD_ARGS="CC=clang CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE=aarch64-linux-gnu- LD=ld.lld"
+          BUILD_ARGS="CC=clang CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE=aarch64-linux-gnu-"
           LTO=${{ github.event.inputs.LtoOptimizations }} \
             BUILD_CONFIG=${{ env.kernelDir }}/${{ env.kernelName }}/build.config.gki.aarch64 \
             build/build.sh -j$(nproc --all) $BUILD_ARGS
@@ -614,7 +607,15 @@ jobs:
             INFO_LINE="🔍 <a href=\"${RUN_URL}\">View build logs</a>"
           fi
 
-          CAPTION="✅ <b>Shiney Kernel is ready</b>\n\n          📱 <b>Device:</b> <code>Redmi Note 13 (sapphire)</code>\n          ⚙️ <b>Kernel:</b> <code>${SPOOF_VER}-android13</code>\n          🔑 <b>Root:</b> <code>${KSU_TYPE}</code>\n          🛡️ <b>SUSFS:</b> <code>${{ github.event.inputs.SUSFS }}</code>\n          🚀 <b>Tune:</b> <code>-${{ github.event.inputs.optimizationLevel }} · ${{ github.event.inputs.tickRate }}Hz · LTO:${{ github.event.inputs.LtoOptimizations }}</code>\n          📅 <b>Built:</b> <code>${TIME_NOW}</code>\n          ${INFO_LINE}"
+          CAPTION="✅ <b>Shiney Kernel is ready</b>
+
+          📱 <b>Device:</b> <code>Redmi Note 13 (sapphire)</code>
+          ⚙️ <b>Kernel:</b> <code>${SPOOF_VER}-android13</code>
+          🔑 <b>Root:</b> <code>${KSU_TYPE}</code>
+          🛡️ <b>SUSFS:</b> <code>${{ github.event.inputs.SUSFS }}</code>
+          🚀 <b>Tune:</b> <code>-${{ github.event.inputs.optimizationLevel }} · ${{ github.event.inputs.tickRate }}Hz · LTO:${{ github.event.inputs.LtoOptimizations }}</code>
+          📅 <b>Built:</b> <code>${TIME_NOW}</code>
+          ${INFO_LINE}"
 
           curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendDocument" \
             -F chat_id="${TELEGRAM_CHAT_ID}" \
@@ -636,7 +637,13 @@ jobs:
           KSU_TYPE="${{ github.event.inputs.ksuVariant }}"
           [ "${{ matrix.variant }}" = "noksu" ] && KSU_TYPE="noksu"
 
-          CAPTION="❌ <b>Shiney Kernel build failed</b>\n\n          📱 <b>Device:</b> <code>Redmi Note 13 (sapphire)</code>\n          🔑 <b>Variant:</b> <code>${KSU_TYPE}</code>\n          🔧 <b>Config:</b> <code>${{ github.event.inputs.kernelBranch }} · -${{ github.event.inputs.optimizationLevel }} · ${{ github.event.inputs.tickRate }}Hz</code>\n          📅 <b>Failed:</b> <code>${DATE}</code>\n          🔍 <a href=\"${RUN_URL}\">Open failure logs</a>"
+          CAPTION="❌ <b>Shiney Kernel build failed</b>
+
+          📱 <b>Device:</b> <code>Redmi Note 13 (sapphire)</code>
+          🔑 <b>Variant:</b> <code>${KSU_TYPE}</code>
+          🔧 <b>Config:</b> <code>${{ github.event.inputs.kernelBranch }} · -${{ github.event.inputs.optimizationLevel }} · ${{ github.event.inputs.tickRate }}Hz</code>
+          📅 <b>Failed:</b> <code>${DATE}</code>
+          🔍 <a href=\"${RUN_URL}\">Open failure logs</a>"
 
           curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage" \
             -d chat_id="${TELEGRAM_CHAT_ID}" \
