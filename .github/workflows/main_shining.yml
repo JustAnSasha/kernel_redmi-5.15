@@ -327,12 +327,11 @@ jobs:
               ;;
             sukisu-ultra)
               KSU_DIR="KernelSU/kernel"
-              # 1. Create minimal SUSFS KSU-side source (provides the three real SUSFS symbols)
+              # 1. Real SUSFS symbols (required by kernel-side susfs.c)
               cat > "$KSU_DIR/susfs_ksu.c" << 'SUSFSEOF'
           #include <linux/export.h>
           #include <linux/types.h>
 
-          /* Real SUSFS symbols required by kernel-side susfs.c */
           bool susfs_is_current_ksu_domain(void) {
               return false;
           }
@@ -345,7 +344,7 @@ jobs:
           EXPORT_SYMBOL(susfs_priv_app_sid);
           SUSFSEOF
 
-              # 2. Stub file for the remaining missing hooks (weak, won't conflict)
+              # 2. Weak stubs for the remaining missing hooks (no conflict)
               cat > "$KSU_DIR/ksu_susfs_stubs.c" << 'STUBEOF'
           #include <linux/export.h>
           #include <linux/types.h>
@@ -372,7 +371,19 @@ jobs:
           void __weak fake_status_initialize_key(void) { }
           STUBEOF
 
-              # 3. Add both objects to KSU build
+              # 3. Late initcall that actually starts SUSFS
+              cat > "$KSU_DIR/susfs_init_call.c" << 'INITEOF'
+          #include <linux/init.h>
+          #include <linux/susfs.h>
+
+          static int __init susfs_late_init(void) {
+              susfs_init();
+              return 0;
+          }
+          late_initcall(susfs_late_init);
+          INITEOF
+
+              # 4. Add all objects to KSU build
               KBUILD="$KSU_DIR/Kbuild"
               [ -f "$KBUILD" ] || KBUILD="$KSU_DIR/Makefile"
               if ! grep -q 'susfs_ksu.o' "$KBUILD"; then
@@ -381,22 +392,8 @@ jobs:
               if ! grep -q 'ksu_susfs_stubs.o' "$KBUILD"; then
                 echo 'obj-$(CONFIG_KSU_SUSFS) += ksu_susfs_stubs.o' >> "$KBUILD"
               fi
-
-              # 4. Inject susfs_init() call into SukiSU's init
-              INIT_FILE="$KSU_DIR/core/init.c"
-              if [ -f "$INIT_FILE" ]; then
-                # Add include if needed
-                if ! grep -q '<linux/susfs.h>' "$INIT_FILE"; then
-                  sed -i '/#include <linux\/fs\.h>/a #include <linux\/susfs.h>' "$INIT_FILE"
-                fi
-                # Add susfs_init() call right after ksu_core_init()
-                if ! grep -q 'susfs_init()' "$INIT_FILE"; then
-                  sed -i '/ksu_core_init();/a \\tsusfs_init();' "$INIT_FILE" || \
-                  sed -i '/ksu_core_init(/a \\tsusfs_init();' "$INIT_FILE"
-                fi
-                echo "✅ SUSFS init injected into $INIT_FILE"
-              else
-                echo "⚠️ Could not find $INIT_FILE – SUSFS may not be enabled"
+              if ! grep -q 'susfs_init_call.o' "$KBUILD"; then
+                echo 'obj-$(CONFIG_KSU_SUSFS) += susfs_init_call.o' >> "$KBUILD"
               fi
               ;;
             resukisu)
