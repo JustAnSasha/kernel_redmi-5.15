@@ -321,6 +321,18 @@ jobs:
               cd ..
               ;;
             sukisu-ultra|resukisu)
+              cp -rf susfs/kernel_patches/KernelSU/kernel/* KernelSU/kernel/
+              KSU_BUILD_FILE="KernelSU/kernel/Kbuild"
+              [ -f "$KSU_BUILD_FILE" ] || KSU_BUILD_FILE="KernelSU/kernel/Makefile"
+              if ! grep -q 'susfs.o' "$KSU_BUILD_FILE"; then
+                echo 'obj-$(CONFIG_KSU_SUSFS) += susfs.o' >> "$KSU_BUILD_FILE"
+              fi
+              KSU_INIT=$(find KernelSU -name "*.c" -exec grep -l "ksu_core_init" {} \; 2>/dev/null | head -1)
+              if [ -n "$KSU_INIT" ] && ! grep -q "susfs_init" "$KSU_INIT"; then
+                sed -i '/#include <linux\/fs\.h>/a #include <linux\/susfs\.h>' "$KSU_INIT"
+                sed -i '/ksu_core_init();/a \\tsusfs_init();' "$KSU_INIT" || \
+                sed -i '/ksu_core_init(/a \\tsusfs_init();' "$KSU_INIT"
+              fi
               ;;
           esac
 
