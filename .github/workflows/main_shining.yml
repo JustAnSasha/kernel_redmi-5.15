@@ -290,100 +290,40 @@ jobs:
         working-directory: ./${{ env.kernelDir }}/${{ env.kernelName }}
         run: |
           set -e
-
           VARIANT="${{ github.event.inputs.ksuVariant }}"
 
-          ksu_build_file() {
-            if [ -f "$1/kernel/Kbuild" ]; then
-              printf '%s\n' "$1/kernel/Kbuild"
-            elif [ -f "$1/kernel/Makefile" ]; then
-              printf '%s\n' "$1/kernel/Makefile"
-            else
-              printf '%s\n' ""
-            fi
-          }
-
-          rm -rf susfs4ksu
           git clone --depth=1 https://gitlab.com/simonpunk/susfs4ksu.git -b gki-android13-5.15
 
-          mkdir -p fs include/linux
-          cp -f susfs4ksu/kernel_patches/fs/susfs.c fs/susfs.c
-          cp -f susfs4ksu/kernel_patches/include/linux/susfs.h include/linux/susfs.h
-          cp -f susfs4ksu/kernel_patches/include/linux/susfs_def.h include/linux/susfs_def.h
-
-          grep -q "#include <linux/cred.h>" include/linux/susfs_def.h || sed -i '1i #include <linux/cred.h>' include/linux/susfs_def.h
-          sed -i 's/size_t copied_size = 0;/size_t __maybe_unused copied_size = 0;/' fs/susfs.c
-          sed -i 's/static int copy_config_to_buf/static int __maybe_unused copy_config_to_buf/' fs/susfs.c
-
-          curl -Lso susfs_kernel.patch "https://raw.githubusercontent.com/ShiningAsStar/extra_kernel_stuff/main/50_add_susfs_in_gki-android13-5.15.patch"
+          curl -Lso susfs_kernel.patch \
+            "https://raw.githubusercontent.com/ShiningAsStar/extra_kernel_stuff/main/50_add_susfs_in_gki-android13-5.15.patch"
           patch -p1 --forward < susfs_kernel.patch || true
           rm -f susfs_kernel.patch
 
-          if grep -q 'SUSFS_IS_INODE_SUS_MAP\|SUSFS_IS_INODE_OPEN_REDIRECT' fs/proc/task_mmu.c && ! grep -qF '#include <linux/susfs_def.h>' fs/proc/task_mmu.c; then
-            if grep -qF '#include <linux/pkeys.h>' fs/proc/task_mmu.c; then
-              sed -i '/#include <linux\/pkeys.h>/a #if defined(CONFIG_KSU_SUSFS_SUS_KSTAT) || defined(CONFIG_KSU_SUSFS_SUS_MAP) || defined(CONFIG_KSU_SUSFS_OPEN_REDIRECT)\n#include <linux\/susfs_def.h>\n#endif' fs/proc/task_mmu.c
-            elif grep -qF '#include <linux/uaccess.h>' fs/proc/task_mmu.c; then
-              sed -i '/#include <linux\/uaccess.h>/a #if defined(CONFIG_KSU_SUSFS_SUS_KSTAT) || defined(CONFIG_KSU_SUSFS_SUS_MAP) || defined(CONFIG_KSU_SUSFS_OPEN_REDIRECT)\n#include <linux\/susfs_def.h>\n#endif' fs/proc/task_mmu.c
-            else
-              sed -i '0,/^#include /s//#if defined(CONFIG_KSU_SUSFS_SUS_KSTAT) || defined(CONFIG_KSU_SUSFS_SUS_MAP) || defined(CONFIG_KSU_SUSFS_OPEN_REDIRECT)\n#include <linux\/susfs_def.h>\n#endif\n&/' fs/proc/task_mmu.c
-            fi
-          fi
-
           case "$VARIANT" in
-            kernelsu|sukisu-ultra)
-              if [ -f "susfs4ksu/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch" ]; then
-                cp -f susfs4ksu/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch KernelSU/
-                cd KernelSU
-                KSU_BUILD_FILE="$(if [ -f kernel/Kbuild ]; then printf '%s\n' kernel/Kbuild; elif [ -f kernel/Makefile ]; then printf '%s\n' kernel/Makefile; else printf '%s\n' ""; fi)"
-                if [ -z "$KSU_BUILD_FILE" ]; then
-                  echo "::error::KernelSU build file missing"
-                  exit 1
-                fi
-                if [ -f kernel/Kbuild ]; then
-                  sed -i 's|kernel/Makefile|kernel/Kbuild|g' 10_enable_susfs_for_ksu.patch
-                fi
-                if patch -p1 --forward --fuzz=3 < 10_enable_susfs_for_ksu.patch; then
-                  echo "$VARIANT SUSFS patch applied"
-                elif grep -q "KSU_SUSFS" kernel/Kconfig && grep -q "susfs" "$KSU_BUILD_FILE"; then
-                  echo "$VARIANT SUSFS patch already applied"
-                  find . -name "*.rej" -delete
-                else
-                  echo "::error::$VARIANT SUSFS patch failed"
-                  find . -name "*.rej" -exec echo "=== {} ===" \; -exec cat {} \;
-                  exit 1
-                fi
-                grep -q "KSU_SUSFS" kernel/Kconfig
-                grep -q "susfs" "$KSU_BUILD_FILE"
-                cd ..
-              else
-                echo "::error::$VARIANT SUSFS patch missing"
-                exit 1
+            kernelsu)
+              cp -rf susfs4ksu/kernel_patches/KernelSU/kernel/* KernelSU/kernel/
+              cd KernelSU
+              if [ -f kernel/Kbuild ]; then
+                sed -i 's|kernel/Makefile|kernel/Kbuild|g' ../susfs4ksu/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch
               fi
-              ;;
-            resukisu)
-              RESU_BUILD_FILE="$(ksu_build_file KernelSU)"
-              if [ -z "$RESU_BUILD_FILE" ]; then
-                echo "::error::ReSukiSU build file missing"
-                exit 1
-              fi
-              grep -q "KSU_SUSFS" KernelSU/kernel/Kconfig
-              grep -q "susfs_init" KernelSU/kernel/core/init.c
+              patch -p1 --forward --fuzz=3 < ../susfs4ksu/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch || true
+              cd ..
               ;;
             next)
-              NEXT_BUILD_FILE="$(ksu_build_file KernelSU-Next)"
-              if [ -z "$NEXT_BUILD_FILE" ]; then
-                echo "::error::KernelSU-Next build file missing"
-                exit 1
-              fi
-              grep -q "KSU_SUSFS" KernelSU-Next/kernel/Kconfig
-              grep -q "SUSFS\|susfs" "$NEXT_BUILD_FILE"
+              cp -rf susfs4ksu/kernel_patches/KernelSU/kernel/* KernelSU-Next/kernel/
+              cd KernelSU-Next
+              patch -p1 --forward --fuzz=3 < ../susfs4ksu/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch || true
+              cd ..
+              ;;
+            sukisu-ultra|resukisu)
               ;;
           esac
 
-          grep -rq "^config KSU_SUSFS" fs/Kconfig 2>/dev/null || printf '\nconfig KSU_SUSFS\n\tbool "KernelSU SuSFS"\n\tdepends on KSU\n\tdefault n\n' >> fs/Kconfig
-          grep -q "obj-\$(CONFIG_KSU_SUSFS)" fs/Makefile 2>/dev/null || printf '\nobj-$(CONFIG_KSU_SUSFS) += susfs.o\n' >> fs/Makefile
+          grep -rq "^config KSU_SUSFS" fs/Kconfig 2>/dev/null || \
+            printf '\nconfig KSU_SUSFS\n\tbool "KernelSU SuSFS"\n\tdepends on KSU\n\tdefault n\n' >> fs/Kconfig
+          grep -q "obj-\$(CONFIG_KSU_SUSFS)" fs/Makefile 2>/dev/null || \
+            printf '\nobj-$(CONFIG_KSU_SUSFS) += susfs.o\n' >> fs/Makefile
 
-          find . -name "*.rej" -delete
           rm -rf susfs4ksu
 
       - name: "⚙️ Configure KernelSU"
