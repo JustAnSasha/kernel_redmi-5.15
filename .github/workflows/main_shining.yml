@@ -325,7 +325,49 @@ jobs:
               patch -p1 --forward --fuzz=3 < ../susfs/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch || true
               cd ..
               ;;
-            sukisu-ultra|resukisu)
+            sukisu-ultra)
+              # Add KSU-side SUSFS files so the linker finds the required symbols
+              KSU_DIR="KernelSU/kernel"
+              # 1. Copy the real SUSFS source (provides susfs_is_current_ksu_domain, susfs_ksu_sid, susfs_priv_app_sid)
+              cp -f susfs/kernel_patches/KernelSU/kernel/susfs.c "$KSU_DIR/susfs.c"
+              # 2. Create a stub file for all other missing hooks (weak, won't conflict)
+              cat > "$KSU_DIR/ksu_susfs_stubs.c" << 'STUBEOF'
+          #include <linux/export.h>
+          #include <linux/types.h>
+
+          struct kstat;
+          struct filename;
+          struct linux_binprm;
+
+          int __weak ksu_is_init_rc_hook_enabled(void) { return 0; }
+          int __weak ksu_is_input_hook_enabled(void) { return 0; }
+          int __weak ksu_handle_sys_reboot(int cmd, const char __user *cmdline) { return 0; }
+          int __weak ksu_handle_faccessat(int dfd, const char __user *filename, int mode) { return 0; }
+          int __weak ksu_handle_sys_read(int fd, void __user *buf, size_t count) { return 0; }
+          int __weak ksu_handle_vfs_fstat(int fd, struct kstat *stat) { return 0; }
+          int __weak ksu_handle_stat(int dfd, const char __user *filename, struct kstat *stat) { return 0; }
+          int __weak ksu_handle_execveat_sucompat(int fd, struct filename *filename, struct linux_binprm *bprm) { return 0; }
+          int __weak ksu_handle_execveat(int fd, struct filename *filename, struct linux_binprm *bprm) { return 0; }
+
+          bool __weak ksu_selinux_hide_running(void) { return false; }
+          bool __weak ksu_selinux_hide_enabled(void) { return false; }
+          int __weak fake_state = 0;
+          bool __weak fake_status = false;
+          void __weak initialize_fake_status(void) { }
+          void __weak fake_status_initialize_key(void) { }
+          STUBEOF
+              # 3. Add both objects to the KSU build system
+              KBUILD="$KSU_DIR/Kbuild"
+              [ -f "$KBUILD" ] || KBUILD="$KSU_DIR/Makefile"
+              if ! grep -q 'susfs.o' "$KBUILD"; then
+                echo 'obj-$(CONFIG_KSU_SUSFS) += susfs.o' >> "$KBUILD"
+              fi
+              if ! grep -q 'ksu_susfs_stubs.o' "$KBUILD"; then
+                echo 'obj-$(CONFIG_KSU_SUSFS) += ksu_susfs_stubs.o' >> "$KBUILD"
+              fi
+              ;;
+            resukisu)
+              # Already has SUSFS built-in – nothing needed
               ;;
           esac
 
