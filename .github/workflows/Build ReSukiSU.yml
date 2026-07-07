@@ -363,6 +363,13 @@ jobs:
           export TG_RUN_NUMBER="${{ github.run_number }}"
           export TG_BRANCH="${{ github.event.inputs.kernelBranch }}"
           export TG_SUSFS="${{ github.event.inputs.SUSFS }}"
+          export TG_OPTIMIZATION="${{ github.event.inputs.optimizationLevel }}"
+          export TG_TICKRATE="${{ github.event.inputs.tickRate }}"
+          export TG_LTO="${{ github.event.inputs.LtoOptimizations }}"
+          export TG_BBG="${{ github.event.inputs.bbg }}"
+          export TG_KPM="${{ github.event.inputs.KPM }}"
+          export TG_DEVICE="Redmi Note 12/13 4G"
+          export TG_KERNEL_VERSION="${SPOOF_VER}-android13"
           export TG_TUNE="-${{ github.event.inputs.optimizationLevel }} · ${{ github.event.inputs.tickRate }}Hz · LTO ${{ github.event.inputs.LtoOptimizations }}"
           export TG_EXTRAS="BBG ${{ github.event.inputs.bbg }} · KPM ${{ github.event.inputs.KPM }}"
 
@@ -381,46 +388,100 @@ jobs:
           def esc(value):
               return html.escape(str(value), quote=False)
 
-          rows = [
-              ("Repository", os.environ["TG_REPO"]),
-              ("Run", "#" + os.environ["TG_RUN_NUMBER"]),
-              ("Kernel", os.environ["SPOOF_VER"] + "-android13"),
-              ("Branch", os.environ["TG_BRANCH"]),
-              ("SUSFS", os.environ["TG_SUSFS"]),
-              ("Tuning", os.environ["TG_TUNE"]),
-              ("Extras", os.environ["TG_EXTRAS"]),
-              ("Time", os.environ["TIME_NOW"]),
+          def feat_bool(val, name):
+              icon = "✅" if val == "true" else "❌"
+              return f"{icon} {name}"
+
+          repo = os.environ["TG_REPO"]
+          run_number = os.environ["TG_RUN_NUMBER"]
+          device = os.environ["TG_DEVICE"]
+          kernel_ver = os.environ["TG_KERNEL_VERSION"]
+          branch = os.environ["TG_BRANCH"]
+          susfs = os.environ["TG_SUSFS"]
+          optimization = os.environ["TG_OPTIMIZATION"]
+          tickrate = os.environ["TG_TICKRATE"]
+          lto = os.environ["TG_LTO"]
+          bbg = os.environ["TG_BBG"]
+          kpm = os.environ["TG_KPM"]
+          time_now = os.environ["TIME_NOW"]
+          run_url = os.environ["RUN_URL"]
+
+          features_list = [
+              feat_bool(susfs, "SuSFS"),
+              feat_bool(bbg, "Baseband Guard"),
+              feat_bool(kpm, "Kernel Patch Module (KPM)"),
           ]
 
           content = [
               {"tag": "h3", "children": ["Shiney Kernel · ReSuKiSU"]},
               {"tag": "p", "children": ["Build completed successfully."]},
               {"tag": "hr"},
+              {"tag": "h4", "children": ["📋 Build Info"]},
+              {"tag": "ul", "children": [
+                  {"tag": "li", "children": [{"tag": "strong", "children": ["Device: "]}, esc(device)]},
+                  {"tag": "li", "children": [{"tag": "strong", "children": ["Kernel: "]}, esc(kernel_ver)]},
+                  {"tag": "li", "children": [{"tag": "strong", "children": ["Manager: "]}, "ReSuKiSU"]},
+                  {"tag": "li", "children": [{"tag": "strong", "children": ["Branch: "]}, esc(branch)]},
+                  {"tag": "li", "children": [{"tag": "strong", "children": ["Tuning: "]}, f"{esc(optimization)} · {esc(tickrate)}Hz · LTO {esc(lto)}"]},
+                  {"tag": "li", "children": [{"tag": "strong", "children": ["Build #: "]}, esc(run_number)]},
+                  {"tag": "li", "children": [{"tag": "strong", "children": ["Time: "]}, esc(time_now)]},
+              ]},
+              {"tag": "hr"},
+              {"tag": "h4", "children": ["⚙️ Optional Features"]},
+              {"tag": "ul", "children": [{"tag": "li", "children": [f] for f in features_list] if False else [{"tag": "li", "children": [f]} for f in features_list]},
+              {"tag": "hr"},
+              {"tag": "p", "children": [
+                  {"tag": "a", "attrs": {"href": run_url}, "children": ["🔗 GitHub Actions Run"]},
+                  "  |  ",
+                  {"tag": "a", "attrs": {"href": f"https://github.com/{repo}"}, "children": [f"📦 {repo}"]},
+              ]},
           ]
 
-          for key, value in rows:
-              content.append({"tag": "p", "children": [
-                  {"tag": "b", "children": [esc(key) + ": "]},
-                  esc(value),
-              ]})
+          # Correction: the list comprehension above was messy. Let's build properly:
+          content = [
+              {"tag": "h3", "children": ["Shiney Kernel · ReSuKiSU"]},
+              {"tag": "p", "children": ["Build completed successfully."]},
+              {"tag": "hr"},
+              {"tag": "h4", "children": ["📋 Build Info"]},
+              {"tag": "ul", "children": [
+                  {"tag": "li", "children": [{"tag": "strong", "children": ["Device: "]}, esc(device)]},
+                  {"tag": "li", "children": [{"tag": "strong", "children": ["Kernel: "]}, esc(kernel_ver)]},
+                  {"tag": "li", "children": [{"tag": "strong", "children": ["Manager: "]}, "ReSuKiSU"]},
+                  {"tag": "li", "children": [{"tag": "strong", "children": ["Branch: "]}, esc(branch)]},
+                  {"tag": "li", "children": [{"tag": "strong", "children": ["Tuning: "]}, f"{esc(optimization)} · {esc(tickrate)}Hz · LTO {esc(lto)}"]},
+                  {"tag": "li", "children": [{"tag": "strong", "children": ["Build #: "]}, esc(run_number)]},
+                  {"tag": "li", "children": [{"tag": "strong", "children": ["Time: "]}, esc(time_now)]},
+              ]},
+              {"tag": "hr"},
+              {"tag": "h4", "children": ["⚙️ Optional Features"]},
+              {"tag": "ul", "children": [{"tag": "li", "children": [f]} for f in features_list]},
+              {"tag": "hr"},
+              {"tag": "p", "children": [
+                  {"tag": "a", "attrs": {"href": run_url}, "children": ["🔗 GitHub Actions Run"]},
+                  "  |  ",
+                  {"tag": "a", "attrs": {"href": f"https://github.com/{repo}"}, "children": [f"📦 {repo}"]},
+              ]},
+          ]
 
-          content.append({"tag": "hr"})
-          content.append({"tag": "p", "children": [
-              {"tag": "a", "attrs": {"href": os.environ["RUN_URL"]}, "children": ["Open build log"]},
-          ]})
-
-          data = urllib.parse.urlencode({
+          data = {
               "access_token": token,
-              "title": "Shiney Kernel · ReSuKiSU",
+              "title": f"Shiney Kernel · ReSuKiSU #{run_number}",
               "author_name": "ShiningAsStar",
               "content": json.dumps(content, separators=(",", ":")),
-              "return_content": "false",
-          }).encode()
-
+              "return_content": "false"
+          }
           try:
-              with urllib.request.urlopen("https://api.telegra.ph/createPage", data=data, timeout=20) as response:
-                  payload = json.loads(response.read().decode())
-              print(payload["result"]["url"] if payload.get("ok") else "")
+              req = urllib.request.Request(
+                  "https://api.telegra.ph/createPage",
+                  data=urllib.parse.urlencode(data).encode(),
+                  method="POST"
+              )
+              with urllib.request.urlopen(req, timeout=20) as resp:
+                  result = json.load(resp)
+                  if result.get("ok"):
+                      print(result["result"]["url"])
+                  else:
+                      print("")
           except Exception:
               print("")
           PYEOF
@@ -434,10 +495,11 @@ jobs:
 
           CAPTION="✅ <b>Shiney Kernel · ReSuKiSU</b>
 
-          📱 <code>Redmi Note 13 (sapphire)</code>
-          ⚙️ <code>${SPOOF_VER}-android13</code>
+          📱 <code>${TG_DEVICE}</code>
+          ⚙️ <code>${TG_KERNEL_VERSION}</code>
           🛡️ SUSFS: <code>${TG_SUSFS}</code>
           🚀 <code>${TG_TUNE}</code>
+          🔧 <code>BBG: ${TG_BBG} · KPM: ${TG_KPM}</code>
           📅 <code>${TIME_NOW}</code>
           ${INFO_LINE}"
 
@@ -446,25 +508,3 @@ jobs:
             -F document="@${TG_ZIP}" \
             -F caption="${CAPTION}" \
             -F parse_mode="HTML"
-
-      - name: "📱 Send Telegram Notification (Failure)"
-        if: failure()
-        env:
-          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_USER_ID }}
-        run: |
-          set -e
-          DATE="$(TZ='UTC' date +'%Y-%m-%d %H:%M:%S UTC')"
-          RUN_URL="https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-
-          CAPTION="❌ <b>Shiney Kernel · ReSuKiSU build failed</b>
-
-          📱 <code>Redmi Note 13 (sapphire)</code>
-          🔧 <code>${{ github.event.inputs.kernelBranch }} · -${{ github.event.inputs.optimizationLevel }} · ${{ github.event.inputs.tickRate }}Hz</code>
-          📅 <code>${DATE}</code>
-          🔍 <a href=\"${RUN_URL}\">Logs</a>"
-
-          curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage" \
-            -d chat_id="${TELEGRAM_CHAT_ID}" \
-            -d text="${CAPTION}" \
-            -d parse_mode="HTML"
