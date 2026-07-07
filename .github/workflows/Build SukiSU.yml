@@ -294,6 +294,9 @@ jobs:
           EOF
           fi
 
+      - name: "🔍 Verify Kconfig symbols exist"
+        run: grep -r "config KSU_SUSFS" --include=Kconfig .
+
       - name: "🔨 Compile kernel"
         working-directory: ${{ env.WORK_DIR }}
         run: |
