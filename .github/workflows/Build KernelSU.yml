@@ -358,7 +358,6 @@ jobs:
           export TG_DEVICE="Redmi Note 12/13 4G"
           export TG_KERNEL_VERSION="${SPOOF_VER}-android13"
           export TG_TUNE="-${{ github.event.inputs.optimizationLevel }} · ${{ github.event.inputs.tickRate }}Hz · LTO ${{ github.event.inputs.LtoOptimizations }}"
-          export TG_EXTRAS="BBG ${{ github.event.inputs.bbg }} · KPM ${{ github.event.inputs.KPM }}"
 
           TELEGRAPH_URL="$(python3 << 'PYEOF'
           import html
@@ -375,8 +374,11 @@ jobs:
           def esc(value):
               return html.escape(str(value), quote=False)
 
+          def is_enabled(val):
+              return str(val).lower() in ("true", "on", "yes", "1")
+
           def feat_bool(val, name):
-              icon = "✅" if val == "true" else "❌"
+              icon = "✅" if is_enabled(val) else "❌"
               return {"tag": "li", "children": [f"{icon} {name}"]}
 
           repo = os.environ["TG_REPO"]
@@ -400,7 +402,7 @@ jobs:
           ]
 
           content = [
-              {"tag": "h3", "children": ["Shiney Kernel · KernelSU"]},
+              {"tag": "h3", "children": ["Shining Kernel · KernelSU"]},
               {"tag": "p", "children": ["Build completed successfully."]},
               {"tag": "hr"},
               {"tag": "h4", "children": ["📋 Build Info"]},
@@ -426,7 +428,7 @@ jobs:
 
           data = {
               "access_token": token,
-              "title": f"Shiney Kernel · KernelSU #{run_number}",
+              "title": f"Shining Kernel · KernelSU #{run_number}",
               "author_name": "ShiningAsStar",
               "content": json.dumps(content, separators=(",", ":")),
               "return_content": "false"
@@ -449,17 +451,16 @@ jobs:
           )"
 
           if [ -n "$TELEGRAPH_URL" ]; then
-            INFO_LINE="🧾 <a href=\"${TELEGRAPH_URL}\">Details</a> · 🔍 <a href=\"${RUN_URL}\">Logs</a>"
+            INFO_LINE="🧾 <a href=\"${TELEGRAPH_URL}\">Details</a>"
           else
-            INFO_LINE="🔍 <a href=\"${RUN_URL}\">View logs</a>"
+            INFO_LINE="🔍 <a href=\"${RUN_URL}\">View details</a>"
           fi
 
-          CAPTION="✅ <b>Shiney Kernel · KernelSU</b>
+          CAPTION="✅ <b>Shining Kernel · KernelSU</b>
 
-          📱 <code>${TG_DEVICE}</code>
-          ⚙️ <code>${TG_KERNEL_VERSION}</code>
-          🛡️ SUSFS: <code>${TG_SUSFS}</code>
-          🚀 <code>${TG_TUNE}</code>
+          📱 <code>${TG_DEVICE}</code>  ⚙️ <code>${TG_KERNEL_VERSION}</code>
+          🔑 <code>KSU: KernelSU</code>
+          🛡️ <code>SUSFS: ${TG_SUSFS}</code>  🚀 <code>${TG_TUNE}</code>
           🔧 <code>BBG: ${TG_BBG} · KPM: ${TG_KPM}</code>
           📅 <code>${TIME_NOW}</code>
           ${INFO_LINE}"

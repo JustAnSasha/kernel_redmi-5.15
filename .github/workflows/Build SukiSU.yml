@@ -234,7 +234,25 @@ jobs:
         run: |
           set -e
           rm -rf KernelSU drivers/kernelsu
-          curl -LSs "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh" | bash -s susfs_new
+          echo "🛠️ Setting up SukiSU Ultra (builtin)..."
+          curl -LSs "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/builtin/kernel/setup.sh" | bash -s susfs_new
+          cd KernelSU
+          KSU_VERSION_COUNT=$(git rev-list --count HEAD)
+          export KSUVER=$(expr $KSU_VERSION_COUNT + 37185)
+          echo "KSUVER=$KSUVER" >> $GITHUB_ENV
+      
+          # Custom version name (@shiney) — SukiSU builds KSU_VERSION_FULL in kernel/Makefile
+          KSU_API_VERSION=$(grep -E "^KSU_VERSION[[:space:]]*=" "../Makefile" | cut -d'=' -f2 | tr -d '[:space:]')
+          [ -z "$KSU_API_VERSION" ] && KSU_API_VERSION="12800"
+          KSU_COMMIT_HASH=$(git rev-parse --short=8 HEAD)
+          KBUILD_FILE="kernel/Makefile"
+          [ -f "kernel/Kbuild" ] && KBUILD_FILE="kernel/Kbuild"
+          sed -i 's/-DKSU_VERSION_FULL=[^ ]*//g' "$KBUILD_FILE"
+          sed -i '/KSU_VERSION_FULL/d' "$KBUILD_FILE"
+          cat >> "$KBUILD_FILE" <<EOF
+          ccflags-y += -DKSU_VERSION_FULL=\"v${KSU_API_VERSION}-${KSU_COMMIT_HASH}@shiney\"
+          EOF
+          echo "✅ SukiSU $KSUVER (v${KSU_API_VERSION}-${KSU_COMMIT_HASH}@shiney)"
 
       - name: "🧩 Setup SUSFS"
         if: github.event.inputs.SUSFS == 'true'
@@ -252,6 +270,8 @@ jobs:
             "https://raw.githubusercontent.com/ShiningAsStar/extra_kernel_stuff/main/50_add_susfs_in_gki-android13-5.15.patch"
           patch -p1 --forward < susfs_kernel.patch || true
           rm -f susfs_kernel.patch
+
+          patch -p1 --forward < susfs/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch || true
 
           rm -rf susfs
           
@@ -365,7 +385,6 @@ jobs:
           export TG_DEVICE="Redmi Note 12/13 4G"
           export TG_KERNEL_VERSION="${SPOOF_VER}-android13"
           export TG_TUNE="-${{ github.event.inputs.optimizationLevel }} · ${{ github.event.inputs.tickRate }}Hz · LTO ${{ github.event.inputs.LtoOptimizations }}"
-          export TG_EXTRAS="BBG ${{ github.event.inputs.bbg }} · KPM ${{ github.event.inputs.KPM }}"
 
           TELEGRAPH_URL="$(python3 << 'PYEOF'
           import html
@@ -382,8 +401,11 @@ jobs:
           def esc(value):
               return html.escape(str(value), quote=False)
 
+          def is_enabled(val):
+              return str(val).lower() in ("true", "on", "yes", "1")
+
           def feat_bool(val, name):
-              icon = "✅" if val == "true" else "❌"
+              icon = "✅" if is_enabled(val) else "❌"
               return {"tag": "li", "children": [f"{icon} {name}"]}
 
           repo = os.environ["TG_REPO"]
@@ -407,7 +429,7 @@ jobs:
           ]
 
           content = [
-              {"tag": "h3", "children": ["Shiney Kernel · SukiSU-Ultra"]},
+              {"tag": "h3", "children": ["Shining Kernel · SukiSU-Ultra"]},
               {"tag": "p", "children": ["Build completed successfully."]},
               {"tag": "hr"},
               {"tag": "h4", "children": ["📋 Build Info"]},
@@ -433,7 +455,7 @@ jobs:
 
           data = {
               "access_token": token,
-              "title": f"Shiney Kernel · SukiSU-Ultra #{run_number}",
+              "title": f"Shining Kernel · SukiSU-Ultra #{run_number}",
               "author_name": "ShiningAsStar",
               "content": json.dumps(content, separators=(",", ":")),
               "return_content": "false"
@@ -456,17 +478,16 @@ jobs:
           )"
 
           if [ -n "$TELEGRAPH_URL" ]; then
-            INFO_LINE="🧾 <a href=\"${TELEGRAPH_URL}\">Details</a> · 🔍 <a href=\"${RUN_URL}\">Logs</a>"
+            INFO_LINE="🧾 <a href=\"${TELEGRAPH_URL}\">Details</a>"
           else
-            INFO_LINE="🔍 <a href=\"${RUN_URL}\">View logs</a>"
+            INFO_LINE="🔍 <a href=\"${RUN_URL}\">View details</a>"
           fi
 
-          CAPTION="✅ <b>Shiney Kernel · SukiSU-Ultra</b>
+          CAPTION="✅ <b>Shining Kernel · SukiSU-Ultra</b>
 
-          📱 <code>${TG_DEVICE}</code>
-          ⚙️ <code>${TG_KERNEL_VERSION}</code>
-          🛡️ SUSFS: <code>${TG_SUSFS}</code>
-          🚀 <code>${TG_TUNE}</code>
+          📱 <code>${TG_DEVICE}</code>  ⚙️ <code>${TG_KERNEL_VERSION}</code>
+          🔑 <code>KSU: SukiSU-Ultra</code>
+          🛡️ <code>SUSFS: ${TG_SUSFS}</code>  🚀 <code>${TG_TUNE}</code>
           🔧 <code>BBG: ${TG_BBG} · KPM: ${TG_KPM}</code>
           📅 <code>${TIME_NOW}</code>
           ${INFO_LINE}"
