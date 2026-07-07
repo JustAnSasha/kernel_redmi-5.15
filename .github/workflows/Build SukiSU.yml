@@ -271,7 +271,7 @@ jobs:
           patch -p1 --forward < susfs_kernel.patch || true
           rm -f susfs_kernel.patch
 
-          patch -p1 --forward < susfs/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch || true
+          patch -p1 --forward -d drivers/kernelsu < susfs/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch || true
 
           rm -rf susfs
           
