@@ -234,7 +234,7 @@ jobs:
         run: |
           set -e
           rm -rf KernelSU drivers/kernelsu
-          curl -LSs "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh" | bash -s susfs_new
+          curl -LSs "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh" | bash -s builtin
           grep -q 'obj-$(CONFIG_KSU) += kernelsu/' drivers/Makefile
           grep -q 'source "drivers/kernelsu/Kconfig"' drivers/Kconfig
 
@@ -295,96 +295,6 @@ jobs:
           CONFIG_KSU_SUSFS_SUS_SU=y
           EOF
           fi
-
-      - name: "🧩 Inject SUSFS Kconfig definitions for SukiSU-Ultra"
-        if: github.event.inputs.SUSFS == 'true'
-        working-directory: ./${{ env.kernelDir }}/${{ env.kernelName }}
-        run: |
-          set -e
-          cat >> drivers/kernelsu/Kconfig << 'EOF'
-          
-          config KSU_SUSFS
-          	  bool "Enable SUSFS support"
-          	  depends on KSU
-          	  default y
-          	  help
-          	    Enable SUSFS for KernelSU.
-          
-          config KSU_SUSFS_HAS_MAGIC_MOUNT
-          	  bool "Enable Magic Mount"
-          	  depends on KSU_SUSFS
-          	  default y
-          
-          config KSU_SUSFS_SUS_PATH
-          	  bool "Enable suspicious path hiding"
-          	  depends on KSU_SUSFS
-          	  default y
-          
-          config KSU_SUSFS_SUS_MOUNT
-          	  bool "Enable suspicious mount hiding"
-          	  depends on KSU_SUSFS
-          	  default y
-          
-          config KSU_SUSFS_AUTO_ADD_SUS_KSU_DEFAULT_MOUNT
-          	  bool "Auto add sus ksu default mount"
-          	  depends on KSU_SUSFS
-          	  default y
-          
-          config KSU_SUSFS_AUTO_ADD_SUS_BIND_MOUNT
-          	  bool "Auto add sus bind mount"
-          	  depends on KSU_SUSFS
-          	  default y
-          
-          config KSU_SUSFS_AUTO_ADD_TRY_UMOUNT_FOR_BIND_MOUNT
-          	  bool "Auto add try umount for bind mount"
-          	  depends on KSU_SUSFS
-          	  default y
-          
-          config KSU_SUSFS_SUS_KSTAT
-          	  bool "Enable spoofing kstat"
-          	  depends on KSU_SUSFS
-          	  default y
-          
-          config KSU_SUSFS_TRY_UMOUNT
-          	  bool "Enable try umount"
-          	  depends on KSU_SUSFS
-          	  default y
-          
-          config KSU_SUSFS_SPOOF_UNAME
-          	  bool "Enable spoofing uname"
-          	  depends on KSU_SUSFS
-          	  default y
-          
-          config KSU_SUSFS_ENABLE_LOG
-          	  bool "Enable SUSFS log"
-          	  depends on KSU_SUSFS
-          	  default y
-          
-          config KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS
-          	  bool "Hide KSU/SUSFS symbols"
-          	  depends on KSU_SUSFS
-          	  default y
-          
-          config KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG
-          	  bool "Spoof cmdline/bootconfig"
-          	  depends on KSU_SUSFS
-          	  default y
-          
-          config KSU_SUSFS_OPEN_REDIRECT
-          	  bool "Enable open redirect"
-          	  depends on KSU_SUSFS
-          	  default y
-          
-          config KSU_SUSFS_SUS_MAP
-          	  bool "Enable SUS map"
-          	  depends on KSU_SUSFS
-          	  default y
-          
-          config KSU_SUSFS_SUS_SU
-          	  bool "Enable SUS su"
-          	  depends on KSU_SUSFS
-          	  default y
-          EOF
 
       - name: "🔨 Compile kernel"
         working-directory: ${{ env.WORK_DIR }}
