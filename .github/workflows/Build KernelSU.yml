@@ -254,11 +254,6 @@ jobs:
           patch -p1 --forward --fuzz=3 < ../susfs/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch || true
           cd ..
 
-          grep -rq "^config KSU_SUSFS" fs/Kconfig 2>/dev/null || \
-            printf '\nconfig KSU_SUSFS\n\tbool "KernelSU SuSFS"\n\tdepends on KSU\n\tdefault n\n' >> fs/Kconfig
-          grep -q "obj-\$(CONFIG_KSU_SUSFS)" fs/Makefile 2>/dev/null || \
-            printf '\nobj-$(CONFIG_KSU_SUSFS) += susfs.o\n' >> fs/Makefile
-
           rm -rf susfs
 
       - name: "⚙️ Configure KernelSU"

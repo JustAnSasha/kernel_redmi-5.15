@@ -234,7 +234,7 @@ jobs:
         run: |
           set -e
           rm -rf KernelSU drivers/kernelsu
-          curl -LSs "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh" | bash -s susfs-gki-android13-5.15
+          curl -LSs "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh" | bash -s susfs_new
           grep -q 'obj-$(CONFIG_KSU) += kernelsu/' drivers/Makefile
           grep -q 'source "drivers/kernelsu/Kconfig"' drivers/Kconfig
 
@@ -243,29 +243,17 @@ jobs:
         working-directory: ./${{ env.kernelDir }}/${{ env.kernelName }}
         run: |
           set -e
-          echo "📦 Cloning SUSFS4KSU..."
           git clone --depth=1 https://gitlab.com/simonpunk/susfs4ksu.git -b gki-android13-5.15 susfs
 
-          echo "📄 Copying SUSFS kernel-side files..."
           mkdir -p include/linux fs
-          cp -f susfs/kernel_patches/include/linux/susfs.h include/linux/susfs.h
-          cp -f susfs/kernel_patches/include/linux/susfs_def.h include/linux/susfs_def.h
-          cp -f susfs/kernel_patches/fs/susfs.c fs/susfs.c # <-- Fixes the missing fs/susfs.o target
+          cp -f susfs/kernel_patches/include/linux/susfs.h include/linux/
+          cp -f susfs/kernel_patches/include/linux/susfs_def.h include/linux/
+          cp -f susfs/kernel_patches/fs/susfs.c fs/
 
-          echo "🔧 Applying SUSFS kernel patch..."
           curl -Lso susfs_kernel.patch \
             "https://raw.githubusercontent.com/ShiningAsStar/extra_kernel_stuff/main/50_add_susfs_in_gki-android13-5.15.patch"
           patch -p1 --forward < susfs_kernel.patch || true
           rm -f susfs_kernel.patch
-
-          # Since we are using SukiSU-Ultra's pre-integrated susfs-main branch,
-          # we DO NOT run 10_enable_susfs_for_ksu.patch here to avoid compiler conflicts.
-
-          echo "🔧 Injecting Kconfig and Makefile targets..."
-          grep -rq "^config KSU_SUSFS" fs/Kconfig 2>/dev/null || \
-            printf '\nconfig KSU_SUSFS\n\tbool "KernelSU SuSFS"\n\tdepends on KSU\n\tdepends on THREAD_INFO_IN_TASK\n\tdefault n\n' >> fs/Kconfig
-          grep -q "obj-\$(CONFIG_KSU_SUSFS)" fs/Makefile 2>/dev/null || \
-            printf '\nobj-$(CONFIG_KSU_SUSFS) += susfs.o\n' >> fs/Makefile
 
           rm -rf susfs
 
