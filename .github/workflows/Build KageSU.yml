@@ -1,4 +1,4 @@
-name: "Build Kernel SukiSU-Ultra"
+name: "Build Kernel KageSU"
 
 env:
   OUT_DIR: "out"
@@ -91,7 +91,7 @@ on:
 
 jobs:
   Build-Kernel:
-    name: "Build kernel (SukiSU-Ultra)"
+    name: "Build kernel (KageSU)"
     runs-on: ubuntu-latest
     env:
       kernelDir: common_${{ github.event.inputs.kernelDevice }}
@@ -229,12 +229,30 @@ jobs:
           echo "CONFIG_BBG=y" >> arch/arm64/configs/${{ env.DEFCONFIG_NAME }}
           sed -i '/^config LSM$/,/^help$/{ /^[[:space:]]*default/ { /baseband_guard/! s/selinux/selinux,baseband_guard/ } }' security/Kconfig
 
-      - name: "🔑 Setup SukiSU-Ultra"
+      - name: "🔑 Setup KageSU"
         working-directory: ./${{ env.kernelDir }}/${{ env.kernelName }}
         run: |
           set -e
           rm -rf KernelSU drivers/kernelsu
-          curl -LSs "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh" | bash -s susfs_new
+          echo "🛠️ Setting up KageSU (builtin)..."
+          curl -LSs "https://raw.githubusercontent.com/KageKSU/KageSU/builtin/kernel/setup.sh" | bash -s builtin
+          cd KernelSU
+          KSU_VERSION_COUNT=$(git rev-list --count HEAD)
+          export KSUVER=$(expr $KSU_VERSION_COUNT + 37185)
+          echo "KSUVER=$KSUVER" >> $GITHUB_ENV
+
+          # Custom version name (@shiney) — KageSU builds KSU_VERSION_FULL in kernel/Makefile
+          KSU_API_VERSION=$(grep -E "^KSU_VERSION[[:space:]]*=" "../Makefile" | cut -d'=' -f2 | tr -d '[:space:]')
+          [ -z "$KSU_API_VERSION" ] && KSU_API_VERSION="12800"
+          KSU_COMMIT_HASH=$(git rev-parse --short=8 HEAD)
+          KBUILD_FILE="kernel/Makefile"
+          [ -f "kernel/Kbuild" ] && KBUILD_FILE="kernel/Kbuild"
+          sed -i 's/-DKSU_VERSION_FULL=[^ ]*//g' "$KBUILD_FILE"
+          sed -i '/KSU_VERSION_FULL/d' "$KBUILD_FILE"
+          cat >> "$KBUILD_FILE" <<EOF
+          ccflags-y += -DKSU_VERSION_FULL=\"v${KSU_API_VERSION}-${KSU_COMMIT_HASH}@shiney\"
+          EOF
+          echo "✅ KageSU $KSUVER (v${KSU_API_VERSION}-${KSU_COMMIT_HASH}@shiney)"
 
       - name: "🧩 Setup SUSFS"
         if: github.event.inputs.SUSFS == 'true'
@@ -254,10 +272,8 @@ jobs:
           rm -f susfs_kernel.patch
 
           rm -rf susfs
-          
 
-
-      - name: "⚙️ Configure SukiSU-Ultra"
+      - name: "⚙️ Configure KageSU"
         working-directory: ./${{ env.kernelDir }}/${{ env.kernelName }}
         run: |
           set -e
@@ -274,6 +290,10 @@ jobs:
           EOF
 
           if [ "${{ github.event.inputs.SUSFS }}" = "true" ]; then
+            cat >> "$CONFIG_FILE" << 'EOF'
+          # CONFIG_KSU_TRACEPOINT_HOOK is not set
+          # CONFIG_KSU_MANUAL_HOOK is not set
+          EOF
             cat >> "$CONFIG_FILE" << 'EOF'
           CONFIG_KSU_SUSFS=y
           CONFIG_KSU_SUSFS_HAS_MAGIC_MOUNT=y
@@ -324,7 +344,7 @@ jobs:
           git clone --depth=1 https://github.com/ShiningAsStar/AnyKernel3 -b master AK3_Workspace
           rm -rf AK3_Workspace/.git
           cp out/dist/Image AK3_Workspace/Image
-          ZIP_NAME="Anykernel3_${{ github.event.inputs.kernelBranch }}_sukisu-ultra_${{ github.event.inputs.optimizationLevel }}_${{ github.event.inputs.tickRate }}hz_${BUILD_TIME}"
+          ZIP_NAME="Anykernel3_${{ github.event.inputs.kernelBranch }}_kagesu_${{ github.event.inputs.optimizationLevel }}_${{ github.event.inputs.tickRate }}hz_${BUILD_TIME}"
           echo "ZIP_NAME=${ZIP_NAME}" >> $GITHUB_ENV
           echo "AK3_DIR=$(pwd)/AK3_Workspace" >> $GITHUB_ENV
 
@@ -389,7 +409,7 @@ jobs:
           ]
 
           content = [
-              {"tag": "h3", "children": ["Shiney Kernel · SukiSU-Ultra"]},
+              {"tag": "h3", "children": ["Shiney Kernel · KageSU"]},
               {"tag": "p", "children": ["Build completed successfully."]},
               {"tag": "hr"},
           ]
@@ -407,7 +427,7 @@ jobs:
 
           data = urllib.parse.urlencode({
               "access_token": token,
-              "title": "Shiney Kernel · SukiSU-Ultra",
+              "title": "Shiney Kernel · KageSU",
               "author_name": "ShiningAsStar",
               "content": json.dumps(content, separators=(",", ":")),
               "return_content": "false",
@@ -428,7 +448,7 @@ jobs:
             INFO_LINE="🔍 <a href=\"${RUN_URL}\">View logs</a>"
           fi
 
-          CAPTION="✅ <b>Shiney Kernel · SukiSU-Ultra</b>
+          CAPTION="✅ <b>Shiney Kernel · KageSU</b>
 
           📱 <code>Redmi Note 13 (sapphire)</code>
           ⚙️ <code>${SPOOF_VER}-android13</code>
@@ -453,7 +473,7 @@ jobs:
           DATE="$(TZ='UTC' date +'%Y-%m-%d %H:%M:%S UTC')"
           RUN_URL="https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
 
-          CAPTION="❌ <b>Shiney Kernel · SukiSU-Ultra build failed</b>
+          CAPTION="❌ <b>Shiney Kernel · KageSU build failed</b>
 
           📱 <code>Redmi Note 13 (sapphire)</code>
           🔧 <code>${{ github.event.inputs.kernelBranch }} · -${{ github.event.inputs.optimizationLevel }} · ${{ github.event.inputs.tickRate }}Hz</code>
