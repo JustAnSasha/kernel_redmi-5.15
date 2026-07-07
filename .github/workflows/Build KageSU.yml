@@ -234,11 +234,11 @@ jobs:
         run: |
           set -e
           rm -rf KernelSU drivers/kernelsu
-          echo "🛠️ Setting up KageSU (builtin)..."
-          curl -LSs "https://raw.githubusercontent.com/KageKSU/KageSU/builtin/kernel/setup.sh" | bash -s builtin
+          echo "🛠️ Setting up KageSU (rework)..."
+          curl -LSs "https://raw.githubusercontent.com/KageKSU/KageSU/rework-miuix/kernel/setup.sh" | bash -s rework-miuix
           cd KernelSU
           KSU_VERSION_COUNT=$(git rev-list --count HEAD)
-          export KSUVER=$(expr $KSU_VERSION_COUNT + 37185)
+          export KSUVER=$(expr $KSU_VERSION_COUNT + 30700)
           echo "KSUVER=$KSUVER" >> $GITHUB_ENV
 
           # Custom version name (@shiney) — KageSU builds KSU_VERSION_FULL in kernel/Makefile
