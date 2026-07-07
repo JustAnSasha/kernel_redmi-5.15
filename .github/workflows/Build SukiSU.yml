@@ -541,3 +541,50 @@ jobs:
             -F document="@${TG_ZIP}" \
             -F caption="${CAPTION}" \
             -F parse_mode="HTML"
+
+      - name: "📱 Send Telegram Notification (Failure)"
+        if: failure()
+        env:
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_USER_ID }}
+        run: |
+          set -e
+
+          REPO_URL="https://github.com/${{ github.repository }}"
+          RUN_URL="$REPO_URL/actions/runs/${{ github.run_id }}"
+          SPOOF_VER="${{ github.event.inputs.kernelSpoofVersion }}"
+          [ -z "$SPOOF_VER" ] && SPOOF_VER="5.15"
+          LOCAL_VERSION="${{ github.event.inputs.localVersion }}"
+          TIME_NOW="$(TZ='UTC' date +'%Y-%m-%d %H:%M:%S UTC')"
+
+          SUSFS_TEXT="${{ github.event.inputs.SUSFS == 'true' && 'Enabled' || 'Disabled' }}"
+          BBG_TEXT="${{ github.event.inputs.bbg == 'on' && 'Enabled' || 'Disabled' }}"
+          KPM_TEXT="${{ github.event.inputs.KPM == 'on' && 'Enabled' || 'Disabled' }}"
+
+          CAPTION="❌ <b>Kernel Build Failed</b>
+
+          📦 <b>Build Information:</b>
+          • Kernel: Linux ${{ env.KERNEL_VERSION }}
+          • Android: ${{ env.ANDROID_VERSION }}
+          • Branch: ${{ github.event.inputs.kernelBranch }}
+          • Device: Redmi Note 12/13 4G
+          • Spoofed version: ${SPOOF_VER}${LOCAL_VERSION}
+
+          ⚙️ <b>Configuration:</b>
+          • LTO: ${{ github.event.inputs.LtoOptimizations }}
+          • Optimization: -${{ github.event.inputs.optimizationLevel }}
+          • Tick Rate: ${{ github.event.inputs.tickRate }}Hz
+
+          🔐 <b>KSU Variant: SukiSU-Ultra</b>
+          • SUSFS: ${SUSFS_TEXT}
+          • Baseband Guard: ${BBG_TEXT}
+          • KPM: ${KPM_TEXT}
+
+          🕐 <b>Failed at:</b> ${TIME_NOW}
+
+          🔍 <a href=\"${RUN_URL}\">View build logs</a>"
+
+          curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage" \
+            -d chat_id="${TELEGRAM_CHAT_ID}" \
+            -d text="${CAPTION}" \
+            -d parse_mode="HTML"
