@@ -1,0 +1,459 @@
+name: "Build Kernel (KernelSU-Next)"
+
+env:
+  OUT_DIR: "out"
+  KERNEL_VERSION: "5.15"
+  ANDROID_VERSION: "13"
+
+on:
+  workflow_dispatch:
+    inputs:
+      kernelSourceURL:
+        description: "Kernel source URL"
+        required: true
+        type: string
+        default: "https://github.com/ShiningAsStar/kernel_redmi-5.15"
+      kernelBranch:
+        description: "Kernel branch"
+        required: true
+        type: choice
+        default: "shining"
+        options:
+          - "google"
+          - "shining"
+      kernelDevice:
+        description: "Device (used for defconfig)"
+        required: true
+        type: string
+        default: "gki"
+      kernelSpoofVersion:
+        description: "Spoof kernel version (X.Y.Z)"
+        required: false
+        type: string
+        default: "6.1.100"
+      localVersion:
+        description: "Custom localversion"
+        required: false
+        type: string
+        default: "-Shiney"
+      SUSFS:
+        description: "Enable SuSFS"
+        required: true
+        type: boolean
+        default: true
+      optimizationLevel:
+        description: "Compiler optimization level"
+        required: false
+        type: choice
+        default: "O3"
+        options:
+          - "O2"
+          - "O3"
+          - "Os"
+      tickRate:
+        description: "Kernel tick rate (Hz)"
+        required: false
+        type: choice
+        default: "250"
+        options:
+          - "default"
+          - "100"
+          - "250"
+          - "300"
+          - "500"
+          - "600"
+          - "750"
+          - "1000"
+      bbg:
+        description: "Baseband-guard"
+        required: true
+        type: choice
+        default: "on"
+        options:
+          - "on"
+          - "off"
+      LtoOptimizations:
+        description: "LTO type"
+        required: true
+        type: choice
+        default: "thin"
+        options:
+          - "thin"
+          - "full"
+
+jobs:
+  Build-Kernel:
+    name: "Build kernel (KernelSU-Next)"
+    runs-on: ubuntu-latest
+    env:
+      kernelDir: common_${{ github.event.inputs.kernelDevice }}
+      kernelName: common
+      DEFCONFIG_NAME: ${{ github.event.inputs.kernelDevice }}_defconfig
+      WORK_DIR: ${{ github.workspace }}
+
+    steps:
+      - name: "🛠️ Prepare environment"
+        run: |
+          mkdir -p $kernelDir
+          echo "BUILD_TIME=$(date +'%Y-%m-%d')" >> $GITHUB_ENV
+          sudo apt-get update -qq
+          sudo apt-get install -y repo rsync aria2
+
+      - name: "🧹 Free up disk space"
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc "/usr/local/share/boost" "$AGENT_TOOLSDIRECTORY"
+          sudo docker image prune --all --force
+          sudo docker builder prune -a -f
+
+      - name: "💾 Configure 8GB swap"
+        uses: pierotofy/set-swap-space@master
+        with:
+          swap-size-gb: 8
+
+      - name: "⚙️ Set swappiness"
+        run: |
+          echo "vm.swappiness=80" | sudo tee -a /etc/sysctl.conf
+          sudo sysctl -p
+
+      - name: "📥 Clone kernel repository"
+        working-directory: ./${{ env.kernelDir }}
+        run: |
+          git clone --recursive --branch ${{ github.event.inputs.kernelBranch }} \
+            ${{ github.event.inputs.kernelSourceURL }} ${{ env.kernelName }} --depth=1
+
+      - name: "🏷️ Set custom kernel version"
+        working-directory: ./${{ env.kernelDir }}/${{ env.kernelName }}
+        run: |
+          SPOOF_VERSION="${{ github.event.inputs.kernelSpoofVersion }}"
+          LOCAL_VERSION="${{ github.event.inputs.localVersion }}"
+          FULL_VERSION="${SPOOF_VERSION}${LOCAL_VERSION}"
+          if [ -n "$SPOOF_VERSION" ]; then
+            sed -i "s/^KERNELVERSION =.*/KERNELVERSION = $FULL_VERSION/" Makefile
+            echo "" > .scmversion
+            sed -i 's/echo "\$res"/#echo "\$res"/g' scripts/setlocalversion
+            CONFIG_FILE="arch/arm64/configs/${{ env.DEFCONFIG_NAME }}"
+            sed -i '/CONFIG_LOCALVERSION/d; /CONFIG_LOCALVERSION_AUTO/d' "$CONFIG_FILE"
+            echo 'CONFIG_LOCALVERSION="'"$LOCAL_VERSION"'"' >> "$CONFIG_FILE"
+            echo "CONFIG_LOCALVERSION_AUTO=n" >> "$CONFIG_FILE"
+            [ -f "build.config.constants" ] && \
+              sed -i "s/^KERNEL_VERSION=.*/KERNEL_VERSION=$FULL_VERSION/" build.config.constants
+          fi
+
+      - name: "🔧 Init manifest and fetch Clang"
+        working-directory: ${{ env.WORK_DIR }}
+        run: |
+          repo init -u https://android.googlesource.com/kernel/manifest -b common-android13-5.15-lts --depth=1
+          repo sync -c --optimized-fetch --prune --no-clone-bundle --no-tags --force-sync --fail-fast -j$(nproc)
+          mkdir -p clang-19
+          aria2c -x16 -s16 -j16 -o clang.tar.gz \
+            "https://github.com/ZyCromerZ/Clang/releases/download/19.0.0git-20240723-release/Clang-19.0.0git-20240723.tar.gz"
+          tar -C clang-19 -zxf clang.tar.gz && rm clang.tar.gz
+          echo "CLANG_PATH=$(pwd)/clang-19" >> $GITHUB_ENV
+          KD="${{ env.kernelDir }}/${{ env.kernelName }}"
+          sed -i '/^DEFCONFIG=gki_defconfig/d' $KD/build.config.gki
+          sed -i '$a\DEFCONFIG=${{ env.DEFCONFIG_NAME }}' $KD/build.config.gki
+          sed -i '/^POST_DEFCONFIG_CMDS="check_defconfig"/d' $KD/build.config.gki
+          sed -i \
+            -e '/^KMI_SYMBOL_LIST_STRICT_MODE=/d' -e '/^TRIM_NONLISTED_KMI=/d' -e '/^KMI_ENFORCED=/d' \
+            -e '$a\KMI_SYMBOL_LIST_STRICT_MODE=0' -e '$a\TRIM_NONLISTED_KMI=0' -e '$a\KMI_ENFORCED=0' \
+            -e '/^MODULES_ORDER=/d' -e '/^MODULES_LIST=/d' \
+            $KD/build.config.gki.aarch64
+
+      - name: "⚡ Patch defconfig and tickrate"
+        working-directory: ./${{ env.kernelDir }}/${{ env.kernelName }}
+        run: |
+          CONFIG_FILE="arch/arm64/configs/${{ env.DEFCONFIG_NAME }}"
+          apply_patch() {
+            local url="$1" file
+            file=$(basename "$1")
+            curl -L -s -f -o "$file" "$url" || return 1
+            if patch -p1 --forward --dry-run < "$file" >/dev/null 2>&1; then
+              patch -p1 --forward < "$file"
+            fi
+            rm -f "$file"
+          }
+          apply_patch "https://raw.githubusercontent.com/ShiningAsStar/extra_kernel_stuff/main/custom-tickrate-options.patch"
+          find . -name "*.rej" -delete
+          sed -i '/CONFIG_CC_OPTIMIZE_FOR_PERFORMANCE\b/d; /CONFIG_CC_OPTIMIZE_FOR_PERFORMANCE_O3/d; /CONFIG_CC_OPTIMIZE_FOR_SIZE/d' "$CONFIG_FILE"
+          case "${{ github.event.inputs.optimizationLevel }}" in
+            O2) echo "CONFIG_CC_OPTIMIZE_FOR_PERFORMANCE=y"    >> "$CONFIG_FILE" ;;
+            O3) echo "CONFIG_CC_OPTIMIZE_FOR_PERFORMANCE_O3=y" >> "$CONFIG_FILE" ;;
+            Os) echo "CONFIG_CC_OPTIMIZE_FOR_SIZE=y"           >> "$CONFIG_FILE" ;;
+          esac
+          if [ "${{ github.event.inputs.tickRate }}" != "default" ]; then
+            TICK="${{ github.event.inputs.tickRate }}"
+            sed -i '/^CONFIG_HZ_/d; /^CONFIG_HZ=/d' "$CONFIG_FILE"
+            printf 'CONFIG_NO_HZ_IDLE=y\nCONFIG_HZ=%s\nCONFIG_HZ_%s=y\n' "$TICK" "$TICK" >> "$CONFIG_FILE"
+          fi
+          sed -i '/^CONFIG_LTO_CLANG/d; /^CONFIG_THINLTO/d' "$CONFIG_FILE"
+          if [ "${{ github.event.inputs.LtoOptimizations }}" = "thin" ]; then
+            printf 'CONFIG_LTO_CLANG=y\nCONFIG_LTO_CLANG_THIN=y\nCONFIG_THINLTO=y\n' >> "$CONFIG_FILE"
+          else
+            printf 'CONFIG_LTO_CLANG=y\nCONFIG_LTO_CLANG_FULL=y\n' >> "$CONFIG_FILE"
+          fi
+          printf 'CONFIG_STRIP_ASM_SYMS=y\nCONFIG_LD_DEAD_CODE_DATA_ELIMINATION=y\n' >> "$CONFIG_FILE"
+          cat >> "$CONFIG_FILE" << 'EOF'
+          CONFIG_TCP_CONG_ADVANCED=y
+          CONFIG_TCP_CONG_WESTWOOD=y
+          CONFIG_TCP_CONG_BBR=y
+          CONFIG_DEFAULT_WESTWOOD=y
+          CONFIG_NET_SCH_FQ=y
+          CONFIG_NET_SCH_FQ_CODEL=y
+          CONFIG_ZRAM=y
+          CONFIG_ZSMALLOC=y
+          CONFIG_CRYPTO_LZ4=y
+          CONFIG_CRYPTO_LZ4HC=y
+          CONFIG_CRYPTO_ZSTD=y
+          CONFIG_ZRAM_DEF_COMP_LZ4=y
+          CONFIG_TMPFS_XATTR=y
+          CONFIG_TMPFS_POSIX_ACL=y
+          CONFIG_PM_WAKELOCKS=y
+          CONFIG_PM_WAKELOCKS_GC=y
+          CONFIG_PM_WAKELOCKS_LIMIT=100
+          EOF
+          apply_patch "https://raw.githubusercontent.com/ShiningAsStar/kernel_patches/main/0001-scripts-sign-builds.patch"
+
+      - name: "🔒 Inject Baseband-guard"
+        if: github.event.inputs.bbg == 'on'
+        working-directory: ./${{ env.kernelDir }}/${{ env.kernelName }}
+        run: |
+          wget -qO- https://github.com/vc-teahouse/Baseband-guard/raw/main/setup.sh | bash
+          echo "CONFIG_BBG=y" >> arch/arm64/configs/${{ env.DEFCONFIG_NAME }}
+          sed -i '/^config LSM$/,/^help$/{ /^[[:space:]]*default/ { /baseband_guard/! s/selinux/selinux,baseband_guard/ } }' security/Kconfig
+
+      - name: "🔑 Setup KernelSU-Next"
+        working-directory: ./${{ env.kernelDir }}/${{ env.kernelName }}
+        run: |
+          set -e
+          rm -rf KernelSU-Next drivers/kernelsu
+          curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/refs/heads/dev/kernel/setup.sh" | bash -s dev-susfs
+          grep -q 'obj-$(CONFIG_KSU) += kernelsu/' drivers/Makefile
+          grep -q 'source "drivers/kernelsu/Kconfig"' drivers/Kconfig
+
+      - name: "🧩 Setup SUSFS"
+        if: github.event.inputs.SUSFS == 'true'
+        working-directory: ./${{ env.kernelDir }}/${{ env.kernelName }}
+        run: |
+          set -e
+          git clone --depth=1 https://gitlab.com/simonpunk/susfs4ksu.git -b gki-android13-5.15 susfs
+
+          mkdir -p include/linux fs
+          cp -f susfs/kernel_patches/include/linux/susfs.h include/linux/
+          cp -f susfs/kernel_patches/include/linux/susfs_def.h include/linux/
+          cp -f susfs/kernel_patches/fs/susfs.c fs/
+
+          curl -Lso susfs_kernel.patch \
+            "https://raw.githubusercontent.com/ShiningAsStar/extra_kernel_stuff/main/50_add_susfs_in_gki-android13-5.15.patch"
+          patch -p1 --forward < susfs_kernel.patch || true
+          rm -f susfs_kernel.patch
+
+          cd KernelSU-Next
+          patch -p1 --forward --fuzz=3 < ../susfs/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch || true
+          cd ..
+
+          grep -rq "^config KSU_SUSFS" fs/Kconfig 2>/dev/null || \
+            printf '\nconfig KSU_SUSFS\n\tbool "KernelSU SuSFS"\n\tdepends on KSU\n\tdefault n\n' >> fs/Kconfig
+          grep -q "obj-\$(CONFIG_KSU_SUSFS)" fs/Makefile 2>/dev/null || \
+            printf '\nobj-$(CONFIG_KSU_SUSFS) += susfs.o\n' >> fs/Makefile
+
+          rm -rf susfs
+
+      - name: "⚙️ Configure KernelSU-Next"
+        working-directory: ./${{ env.kernelDir }}/${{ env.kernelName }}
+        run: |
+          set -e
+          CONFIG_FILE="arch/arm64/configs/${{ env.DEFCONFIG_NAME }}"
+
+          sed -i '/^CONFIG_KSU=/d; /^CONFIG_KSU_TRACEPOINT_HOOK=/d; /^CONFIG_KSU_MANUAL_HOOK=/d; /^CONFIG_KSU_SUSFS/d' "$CONFIG_FILE"
+
+          cat >> "$CONFIG_FILE" << 'EOF'
+          CONFIG_KSU=y
+          CONFIG_OVERLAY_FS=y
+          CONFIG_TMPFS_XATTR=y
+          CONFIG_TMPFS_POSIX_ACL=y
+          CONFIG_KALLSYMS=y
+          EOF
+
+          if [ "${{ github.event.inputs.SUSFS }}" = "true" ]; then
+            cat >> "$CONFIG_FILE" << 'EOF'
+          CONFIG_KSU_SUSFS=y
+          CONFIG_KSU_SUSFS_HAS_MAGIC_MOUNT=y
+          CONFIG_KSU_SUSFS_SUS_PATH=y
+          CONFIG_KSU_SUSFS_SUS_MOUNT=y
+          CONFIG_KSU_SUSFS_AUTO_ADD_SUS_KSU_DEFAULT_MOUNT=y
+          CONFIG_KSU_SUSFS_AUTO_ADD_SUS_BIND_MOUNT=y
+          CONFIG_KSU_SUSFS_AUTO_ADD_TRY_UMOUNT_FOR_BIND_MOUNT=y
+          CONFIG_KSU_SUSFS_SUS_KSTAT=y
+          CONFIG_KSU_SUSFS_TRY_UMOUNT=y
+          CONFIG_KSU_SUSFS_SPOOF_UNAME=y
+          CONFIG_KSU_SUSFS_ENABLE_LOG=y
+          CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS=y
+          CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG=y
+          CONFIG_KSU_SUSFS_OPEN_REDIRECT=y
+          CONFIG_KSU_SUSFS_SUS_MAP=y
+          CONFIG_KSU_SUSFS_SUS_SU=y
+          EOF
+          fi
+
+      - name: "🔨 Compile kernel"
+        working-directory: ${{ env.WORK_DIR }}
+        run: |
+          export PATH=$CLANG_PATH/bin:$PATH
+          export KBUILD_BUILD_USER=ShiningAsStar
+          export KBUILD_BUILD_HOST=GitHub
+          BUILD_ARGS="CC=clang CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE=aarch64-linux-gnu-"
+          LTO=${{ github.event.inputs.LtoOptimizations }} \
+            BUILD_CONFIG=${{ env.kernelDir }}/${{ env.kernelName }}/build.config.gki.aarch64 \
+            build/build.sh -j$(nproc --all) $BUILD_ARGS
+
+      - name: "📦 Prepare AnyKernel3 package"
+        working-directory: ${{ env.WORK_DIR }}
+        run: |
+          BUILD_TIME=$(date +'%Y-%m-%d')
+          if [ ! -f out/dist/Image ]; then
+            echo "::error::Kernel Image not found!"
+            exit 1
+          fi
+          git clone --depth=1 https://github.com/ShiningAsStar/AnyKernel3 -b master AK3_Workspace
+          rm -rf AK3_Workspace/.git
+          cp out/dist/Image AK3_Workspace/Image
+          ZIP_NAME="Anykernel3_${{ github.event.inputs.kernelBranch }}_kernelsu-next_${{ github.event.inputs.optimizationLevel }}_${{ github.event.inputs.tickRate }}hz_${BUILD_TIME}"
+          echo "ZIP_NAME=${ZIP_NAME}" >> $GITHUB_ENV
+          echo "AK3_DIR=$(pwd)/AK3_Workspace" >> $GITHUB_ENV
+
+      - name: "📤 Upload build artifact"
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.ZIP_NAME }}
+          path: ${{ env.AK3_DIR }}
+          compression-level: 9
+          retention-days: 3
+
+      - name: "📱 Send Telegram Notification"
+        if: success()
+        env:
+          TELEGRAPH_TOKEN: ${{ secrets.TELEGRAPH_TOKEN }}
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_USER_ID }}
+        run: |
+          set -e
+
+          TIME_NOW="$(TZ='UTC' date +'%Y-%m-%d %H:%M:%S UTC')"
+          REPO_URL="https://github.com/${{ github.repository }}"
+          RUN_URL="$REPO_URL/actions/runs/${{ github.run_id }}"
+          SPOOF_VER="${{ github.event.inputs.kernelSpoofVersion }}"
+          [ -z "$SPOOF_VER" ] && SPOOF_VER="5.15"
+
+          TG_ZIP="/tmp/${{ env.ZIP_NAME }}.zip"
+          (cd "${{ env.AK3_DIR }}" && zip -r9 "$TG_ZIP" ./)
+
+          export RUN_URL SPOOF_VER TIME_NOW
+          export TG_REPO="${{ github.repository }}"
+          export TG_RUN_NUMBER="${{ github.run_number }}"
+          export TG_BRANCH="${{ github.event.inputs.kernelBranch }}"
+          export TG_SUSFS="${{ github.event.inputs.SUSFS }}"
+          export TG_TUNE="-${{ github.event.inputs.optimizationLevel }} · ${{ github.event.inputs.tickRate }}Hz · LTO ${{ github.event.inputs.LtoOptimizations }}"
+          export TG_EXTRAS="BBG ${{ github.event.inputs.bbg }}"
+
+          TELEGRAPH_URL="$(python3 << 'PYEOF'
+          import html
+          import json
+          import os
+          import urllib.parse
+          import urllib.request
+
+          token = os.environ.get("TELEGRAPH_TOKEN", "").strip()
+          if not token:
+              print("")
+              raise SystemExit
+
+          def esc(value):
+              return html.escape(str(value), quote=False)
+
+          rows = [
+              ("Repository", os.environ["TG_REPO"]),
+              ("Run", "#" + os.environ["TG_RUN_NUMBER"]),
+              ("Kernel", os.environ["SPOOF_VER"] + "-android13"),
+              ("Branch", os.environ["TG_BRANCH"]),
+              ("SUSFS", os.environ["TG_SUSFS"]),
+              ("Tuning", os.environ["TG_TUNE"]),
+              ("Extras", os.environ["TG_EXTRAS"]),
+              ("Time", os.environ["TIME_NOW"]),
+          ]
+
+          content = [
+              {"tag": "h3", "children": ["Shiney Kernel · KernelSU-Next"]},
+              {"tag": "p", "children": ["Build completed successfully."]},
+              {"tag": "hr"},
+          ]
+
+          for key, value in rows:
+              content.append({"tag": "p", "children": [
+                  {"tag": "b", "children": [esc(key) + ": "]},
+                  esc(value),
+              ]})
+
+          content.append({"tag": "hr"})
+          content.append({"tag": "p", "children": [
+              {"tag": "a", "attrs": {"href": os.environ["RUN_URL"]}, "children": ["Open build log"]},
+          ]})
+
+          data = urllib.parse.urlencode({
+              "access_token": token,
+              "title": "Shiney Kernel · KernelSU-Next",
+              "author_name": "ShiningAsStar",
+              "content": json.dumps(content, separators=(",", ":")),
+              "return_content": "false",
+          }).encode()
+
+          try:
+              with urllib.request.urlopen("https://api.telegra.ph/createPage", data=data, timeout=20) as response:
+                  payload = json.loads(response.read().decode())
+              print(payload["result"]["url"] if payload.get("ok") else "")
+          except Exception:
+              print("")
+          PYEOF
+          )"
+
+          if [ -n "$TELEGRAPH_URL" ]; then
+            INFO_LINE="🧾 <a href=\"${TELEGRAPH_URL}\">Details</a> · 🔍 <a href=\"${RUN_URL}\">Logs</a>"
+          else
+            INFO_LINE="🔍 <a href=\"${RUN_URL}\">View logs</a>"
+          fi
+
+          CAPTION="✅ <b>Shiney Kernel · KernelSU-Next</b>
+
+          📱 <code>Redmi Note 13 (sapphire)</code>
+          ⚙️ <code>${SPOOF_VER}-android13</code>
+          🛡️ SUSFS: <code>${TG_SUSFS}</code>
+          🚀 <code>${TG_TUNE}</code>
+          📅 <code>${TIME_NOW}</code>
+          ${INFO_LINE}"
+
+          curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendDocument" \
+            -F chat_id="${TELEGRAM_CHAT_ID}" \
+            -F document="@${TG_ZIP}" \
+            -F caption="${CAPTION}" \
+            -F parse_mode="HTML"
+
+      - name: "📱 Send Telegram Notification (Failure)"
+        if: failure()
+        env:
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_USER_ID }}
+        run: |
+          set -e
+          DATE="$(TZ='UTC' date +'%Y-%m-%d %H:%M:%S UTC')"
+          RUN_URL="https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+
+          CAPTION="❌ <b>Shiney Kernel · KernelSU-Next build failed</b>
+
+          📱 <code>Redmi Note 13 (sapphire)</code>
+          🔧 <code>${{ github.event.inputs.kernelBranch }} · -${{ github.event.inputs.optimizationLevel }} · ${{ github.event.inputs.tickRate }}Hz</code>
+          📅 <code>${DATE}</code>
+          🔍 <a href=\"${RUN_URL}\">Logs</a>"
+
+          curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage" \
+            -d chat_id="${TELEGRAM_CHAT_ID}" \
+            -d text="${CAPTION}" \
+            -d parse_mode="HTML"

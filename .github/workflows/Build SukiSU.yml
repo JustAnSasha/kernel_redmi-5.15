@@ -1,4 +1,4 @@
-name: "Build kernels (NoKSU, SukiSU, ReSukiSU, Next) Updated"
+name: "Build Kernel (SukiSU-Ultra)"
 
 env:
   OUT_DIR: "out"
@@ -36,27 +36,8 @@ on:
         required: false
         type: string
         default: "-Shiney"
-      buildKSU:
-        description: "Build KSU variant?"
-        required: true
-        type: choice
-        default: "ksu"
-        options:
-          - "noksu"
-          - "ksu"
-          - "both"
-      ksuVariant:
-        description: "KSU implementation"
-        required: true
-        type: choice
-        default: "sukisu-ultra"
-        options:
-          - "kernelsu"
-          - "sukisu-ultra"
-          - "resukisu"
-          - "next"
       SUSFS:
-        description: "Enable SuSFS (Enhances hide environment)"
+        description: "Enable SuSFS"
         required: true
         type: boolean
         default: true
@@ -84,7 +65,7 @@ on:
           - "750"
           - "1000"
       bbg:
-        description: "Baseband-guard (if KSU)"
+        description: "Baseband-guard"
         required: true
         type: choice
         default: "on"
@@ -100,7 +81,7 @@ on:
           - "thin"
           - "full"
       KPM:
-        description: "Kernel Patch Module (SukiSU/ReSukiSU)"
+        description: "Kernel Patch Module"
         required: true
         type: choice
         default: "off"
@@ -110,16 +91,8 @@ on:
 
 jobs:
   Build-Kernel:
-    name: "Build kernel (${{ matrix.variant }})"
+    name: "Build kernel (SukiSU-Ultra)"
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        variant: ${{ fromJSON(
-          inputs.buildKSU == 'both' && '["noksu", "ksu"]' ||
-          inputs.buildKSU == 'ksu' && '["ksu"]' ||
-          '["noksu"]' ) }}
-
     env:
       kernelDir: common_${{ github.event.inputs.kernelDevice }}
       kernelName: common
@@ -249,157 +222,44 @@ jobs:
           apply_patch "https://raw.githubusercontent.com/ShiningAsStar/kernel_patches/main/0001-scripts-sign-builds.patch"
 
       - name: "🔒 Inject Baseband-guard"
-        if: matrix.variant == 'ksu' && github.event.inputs.bbg == 'on'
+        if: github.event.inputs.bbg == 'on'
         working-directory: ./${{ env.kernelDir }}/${{ env.kernelName }}
         run: |
           wget -qO- https://github.com/vc-teahouse/Baseband-guard/raw/main/setup.sh | bash
           echo "CONFIG_BBG=y" >> arch/arm64/configs/${{ env.DEFCONFIG_NAME }}
           sed -i '/^config LSM$/,/^help$/{ /^[[:space:]]*default/ { /baseband_guard/! s/selinux/selinux,baseband_guard/ } }' security/Kconfig
 
-      - name: "🔑 Setup KernelSU"
-        if: matrix.variant == 'ksu'
+      - name: "🔑 Setup SukiSU-Ultra"
         working-directory: ./${{ env.kernelDir }}/${{ env.kernelName }}
         run: |
           set -e
-
-          VARIANT="${{ github.event.inputs.ksuVariant }}"
-          SUSFS="${{ github.event.inputs.SUSFS }}"
-
-          rm -rf KernelSU KernelSU-Next drivers/kernelsu
-
-          case "$VARIANT" in
-            kernelsu)
-              curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -s main
-              ;;
-            sukisu-ultra)
-              curl -LSs "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh" | bash -s main
-              ;;
-            resukisu)
-              curl -LSs "https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/main/kernel/setup.sh" | bash -s main
-              ;;
-            next)
-              curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/refs/heads/dev/kernel/setup.sh" | bash -s dev-susfs
-              ;;
-          esac
-
+          rm -rf KernelSU drivers/kernelsu
+          curl -LSs "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh" | bash -s susfs-gki-android13-5.15
           grep -q 'obj-$(CONFIG_KSU) += kernelsu/' drivers/Makefile
           grep -q 'source "drivers/kernelsu/Kconfig"' drivers/Kconfig
 
       - name: "🧩 Setup SUSFS"
-        if: matrix.variant == 'ksu' && github.event.inputs.SUSFS == 'true'
+        if: github.event.inputs.SUSFS == 'true'
         working-directory: ./${{ env.kernelDir }}/${{ env.kernelName }}
         run: |
           set -e
-          VARIANT="${{ github.event.inputs.ksuVariant }}"
-
           git clone --depth=1 https://gitlab.com/simonpunk/susfs4ksu.git -b gki-android13-5.15 susfs
 
-          mkdir -p include/linux fs
+          mkdir -p include/linux
           cp -f susfs/kernel_patches/include/linux/susfs.h include/linux/
           cp -f susfs/kernel_patches/include/linux/susfs_def.h include/linux/
-          cp -f susfs/kernel_patches/fs/susfs.c fs/
 
           curl -Lso susfs_kernel.patch \
             "https://raw.githubusercontent.com/ShiningAsStar/extra_kernel_stuff/main/50_add_susfs_in_gki-android13-5.15.patch"
           patch -p1 --forward < susfs_kernel.patch || true
           rm -f susfs_kernel.patch
 
-          if [ "$VARIANT" = "sukisu-ultra" ]; then
-            curl -Lso sukisu_fix.patch \
-              "https://raw.githubusercontent.com/ShiningAsStar/extra_kernel_stuff/main/fix_sukisu_susfs_implementation.patch"
-            patch -p1 --forward < sukisu_fix.patch
-            rm -f sukisu_fix.patch
+          cd KernelSU
+          if [ -f kernel/Kbuild ]; then
+            sed -i 's|kernel/Makefile|kernel/Kbuild|g' ../susfs/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch
           fi
-
-          case "$VARIANT" in
-            kernelsu)
-              cd KernelSU
-              if [ -f kernel/Kbuild ]; then
-                sed -i 's|kernel/Makefile|kernel/Kbuild|g' ../susfs/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch
-              fi
-              patch -p1 --forward --fuzz=3 < ../susfs/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch || true
-              cd ..
-              ;;
-            next)
-              cd KernelSU-Next
-              patch -p1 --forward --fuzz=3 < ../susfs/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch || true
-              cd ..
-              ;;
-            sukisu-ultra)
-              KSU_DIR="KernelSU/kernel"
-              # 1. Real SUSFS symbols (required by kernel-side susfs.c)
-              cat > "$KSU_DIR/susfs_ksu.c" << 'SUSFSEOF'
-          #include <linux/export.h>
-          #include <linux/types.h>
-
-          bool susfs_is_current_ksu_domain(void) {
-              return false;
-          }
-          EXPORT_SYMBOL(susfs_is_current_ksu_domain);
-
-          int susfs_ksu_sid = 0;
-          EXPORT_SYMBOL(susfs_ksu_sid);
-
-          int susfs_priv_app_sid = 0;
-          EXPORT_SYMBOL(susfs_priv_app_sid);
-          SUSFSEOF
-
-              # 2. Weak stubs for the remaining missing hooks (no conflict)
-              cat > "$KSU_DIR/ksu_susfs_stubs.c" << 'STUBEOF'
-          #include <linux/export.h>
-          #include <linux/types.h>
-
-          struct kstat;
-          struct filename;
-          struct linux_binprm;
-
-          int __weak ksu_is_init_rc_hook_enabled(void) { return 0; }
-          int __weak ksu_is_input_hook_enabled(void) { return 0; }
-          int __weak ksu_handle_sys_reboot(int cmd, const char __user *cmdline) { return 0; }
-          int __weak ksu_handle_faccessat(int dfd, const char __user *filename, int mode) { return 0; }
-          int __weak ksu_handle_sys_read(int fd, void __user *buf, size_t count) { return 0; }
-          int __weak ksu_handle_vfs_fstat(int fd, struct kstat *stat) { return 0; }
-          int __weak ksu_handle_stat(int dfd, const char __user *filename, struct kstat *stat) { return 0; }
-          int __weak ksu_handle_execveat_sucompat(int fd, struct filename *filename, struct linux_binprm *bprm) { return 0; }
-          int __weak ksu_handle_execveat(int fd, struct filename *filename, struct linux_binprm *bprm) { return 0; }
-
-          bool __weak ksu_selinux_hide_running(void) { return false; }
-          bool __weak ksu_selinux_hide_enabled(void) { return false; }
-          int __weak fake_state = 0;
-          bool __weak fake_status = false;
-          void __weak initialize_fake_status(void) { }
-          void __weak fake_status_initialize_key(void) { }
-          STUBEOF
-
-              # 3. Late initcall that actually starts SUSFS
-              cat > "$KSU_DIR/susfs_init_call.c" << 'INITEOF'
-          #include <linux/init.h>
-          #include <linux/susfs.h>
-
-          static int __init susfs_late_init(void) {
-              susfs_init();
-              return 0;
-          }
-          late_initcall(susfs_late_init);
-          INITEOF
-
-              # 4. Add all objects to KSU build
-              KBUILD="$KSU_DIR/Kbuild"
-              [ -f "$KBUILD" ] || KBUILD="$KSU_DIR/Makefile"
-              if ! grep -q 'susfs_ksu.o' "$KBUILD"; then
-                echo 'obj-$(CONFIG_KSU_SUSFS) += susfs_ksu.o' >> "$KBUILD"
-              fi
-              if ! grep -q 'ksu_susfs_stubs.o' "$KBUILD"; then
-                echo 'obj-$(CONFIG_KSU_SUSFS) += ksu_susfs_stubs.o' >> "$KBUILD"
-              fi
-              if ! grep -q 'susfs_init_call.o' "$KBUILD"; then
-                echo 'obj-$(CONFIG_KSU_SUSFS) += susfs_init_call.o' >> "$KBUILD"
-              fi
-              ;;
-            resukisu)
-              # Already has SUSFS built-in – nothing needed
-              ;;
-          esac
+          patch -p1 --forward --fuzz=3 < ../susfs/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch || true
+          cd ..
 
           grep -rq "^config KSU_SUSFS" fs/Kconfig 2>/dev/null || \
             printf '\nconfig KSU_SUSFS\n\tbool "KernelSU SuSFS"\n\tdepends on KSU\n\tdefault n\n' >> fs/Kconfig
@@ -408,20 +268,13 @@ jobs:
 
           rm -rf susfs
 
-      - name: "⚙️ Configure KernelSU"
-        if: matrix.variant == 'ksu'
+      - name: "⚙️ Configure SukiSU-Ultra"
         working-directory: ./${{ env.kernelDir }}/${{ env.kernelName }}
         run: |
           set -e
-
-          VARIANT="${{ github.event.inputs.ksuVariant }}"
-          SUSFS="${{ github.event.inputs.SUSFS }}"
           CONFIG_FILE="arch/arm64/configs/${{ env.DEFCONFIG_NAME }}"
 
-          sed -i '/^CONFIG_KSU=/d' "$CONFIG_FILE"
-          sed -i '/^CONFIG_KSU_TRACEPOINT_HOOK=/d' "$CONFIG_FILE"
-          sed -i '/^CONFIG_KSU_MANUAL_HOOK=/d' "$CONFIG_FILE"
-          sed -i '/^CONFIG_KSU_SUSFS/d' "$CONFIG_FILE"
+          sed -i '/^CONFIG_KSU=/d; /^CONFIG_KSU_TRACEPOINT_HOOK=/d; /^CONFIG_KSU_MANUAL_HOOK=/d; /^CONFIG_KSU_SUSFS/d' "$CONFIG_FILE"
 
           cat >> "$CONFIG_FILE" << 'EOF'
           CONFIG_KSU=y
@@ -431,14 +284,7 @@ jobs:
           CONFIG_KALLSYMS=y
           EOF
 
-          if [ "$SUSFS" = "true" ]; then
-            if [ "$VARIANT" = "resukisu" ]; then
-              cat >> "$CONFIG_FILE" << 'EOF'
-          # CONFIG_KSU_TRACEPOINT_HOOK is not set
-          # CONFIG_KSU_MANUAL_HOOK is not set
-          EOF
-            fi
-
+          if [ "${{ github.event.inputs.SUSFS }}" = "true" ]; then
             cat >> "$CONFIG_FILE" << 'EOF'
           CONFIG_KSU_SUSFS=y
           CONFIG_KSU_SUSFS_HAS_MAGIC_MOUNT=y
@@ -471,7 +317,7 @@ jobs:
             build/build.sh -j$(nproc --all) $BUILD_ARGS
 
       - name: "🧩 Apply KPM patch"
-        if: matrix.variant == 'ksu' && github.event.inputs.KPM == 'on' && (github.event.inputs.ksuVariant == 'sukisu-ultra' || github.event.inputs.ksuVariant == 'resukisu')
+        if: github.event.inputs.KPM == 'on'
         working-directory: ${{ env.WORK_DIR }}/out/dist
         run: |
           curl -fL -s -o patch_linux https://github.com/SukiSU-Ultra/SukiSU_KernelPatch_patch/releases/download/0.13.0/patch_linux
@@ -482,17 +328,14 @@ jobs:
         working-directory: ${{ env.WORK_DIR }}
         run: |
           BUILD_TIME=$(date +'%Y-%m-%d')
-          VARIANT_NAME="${{ matrix.variant }}"
           if [ ! -f out/dist/Image ]; then
             echo "::error::Kernel Image not found!"
             exit 1
           fi
           git clone --depth=1 https://github.com/ShiningAsStar/AnyKernel3 -b master AK3_Workspace
           rm -rf AK3_Workspace/.git
-          cp out/dist/Image AK3_Workspace/Image.$VARIANT_NAME
-          KSU_INFO=""
-          [ "$VARIANT_NAME" = "ksu" ] && KSU_INFO="_${{ github.event.inputs.ksuVariant }}"
-          ZIP_NAME="Anykernel3_${{ github.event.inputs.kernelBranch }}${KSU_INFO}_${{ github.event.inputs.optimizationLevel }}_${{ github.event.inputs.tickRate }}hz_${BUILD_TIME}"
+          cp out/dist/Image AK3_Workspace/Image
+          ZIP_NAME="Anykernel3_${{ github.event.inputs.kernelBranch }}_sukisu-ultra_${{ github.event.inputs.optimizationLevel }}_${{ github.event.inputs.tickRate }}hz_${BUILD_TIME}"
           echo "ZIP_NAME=${ZIP_NAME}" >> $GITHUB_ENV
           echo "AK3_DIR=$(pwd)/AK3_Workspace" >> $GITHUB_ENV
 
@@ -519,33 +362,16 @@ jobs:
           SPOOF_VER="${{ github.event.inputs.kernelSpoofVersion }}"
           [ -z "$SPOOF_VER" ] && SPOOF_VER="5.15"
 
-          KSU_TYPE="Vanilla"
-          if [ "${{ matrix.variant }}" = "ksu" ]; then
-            case "${{ github.event.inputs.ksuVariant }}" in
-              kernelsu) KSU_TYPE="KernelSU" ;;
-              sukisu-ultra) KSU_TYPE="SukiSU-Ultra" ;;
-              resukisu) KSU_TYPE="ReSukiSU" ;;
-              next) KSU_TYPE="KernelSU-Next" ;;
-            esac
-          fi
-
           TG_ZIP="/tmp/${{ env.ZIP_NAME }}.zip"
           (cd "${{ env.AK3_DIR }}" && zip -r9 "$TG_ZIP" ./)
 
-          export TIME_NOW REPO_URL RUN_URL SPOOF_VER KSU_TYPE
+          export RUN_URL SPOOF_VER TIME_NOW
           export TG_REPO="${{ github.repository }}"
           export TG_RUN_NUMBER="${{ github.run_number }}"
           export TG_BRANCH="${{ github.event.inputs.kernelBranch }}"
-          export TG_DEVICE="Redmi Note 13 (sapphire)"
-          export TG_ANDROID="Android 13"
-          export TG_BUILD="${{ github.event.inputs.buildKSU }}"
-          export TG_VARIANT="${{ github.event.inputs.ksuVariant }}"
           export TG_SUSFS="${{ github.event.inputs.SUSFS }}"
-          export TG_OPT="${{ github.event.inputs.optimizationLevel }}"
-          export TG_TICK="${{ github.event.inputs.tickRate }}"
-          export TG_LTO="${{ github.event.inputs.LtoOptimizations }}"
-          export TG_BBG="${{ github.event.inputs.bbg }}"
-          export TG_KPM="${{ github.event.inputs.KPM }}"
+          export TG_TUNE="-${{ github.event.inputs.optimizationLevel }} · ${{ github.event.inputs.tickRate }}Hz · LTO ${{ github.event.inputs.LtoOptimizations }}"
+          export TG_EXTRAS="BBG ${{ github.event.inputs.bbg }} · KPM ${{ github.event.inputs.KPM }}"
 
           TELEGRAPH_URL="$(python3 << 'PYEOF'
           import html
@@ -565,23 +391,16 @@ jobs:
           rows = [
               ("Repository", os.environ["TG_REPO"]),
               ("Run", "#" + os.environ["TG_RUN_NUMBER"]),
-              ("Device", os.environ["TG_DEVICE"]),
               ("Kernel", os.environ["SPOOF_VER"] + "-android13"),
               ("Branch", os.environ["TG_BRANCH"]),
-              ("Root", os.environ["KSU_TYPE"]),
-              ("Build", os.environ["TG_BUILD"]),
-              ("Variant", os.environ["TG_VARIANT"]),
               ("SUSFS", os.environ["TG_SUSFS"]),
-              ("Optimization", "-" + os.environ["TG_OPT"]),
-              ("Tick rate", os.environ["TG_TICK"] + "Hz"),
-              ("LTO", os.environ["TG_LTO"]),
-              ("BBG", os.environ["TG_BBG"]),
-              ("KPM", os.environ["TG_KPM"]),
+              ("Tuning", os.environ["TG_TUNE"]),
+              ("Extras", os.environ["TG_EXTRAS"]),
               ("Time", os.environ["TIME_NOW"]),
           ]
 
           content = [
-              {"tag": "h3", "children": ["Shiney Kernel build"]},
+              {"tag": "h3", "children": ["Shiney Kernel · SukiSU-Ultra"]},
               {"tag": "p", "children": ["Build completed successfully."]},
               {"tag": "hr"},
           ]
@@ -592,19 +411,14 @@ jobs:
                   esc(value),
               ]})
 
-          content.extend([
-              {"tag": "hr"},
-              {"tag": "p", "children": [
-                  {"tag": "a", "attrs": {"href": os.environ["RUN_URL"]}, "children": ["Open GitHub Actions run"]},
-              ]},
-              {"tag": "p", "children": [
-                  {"tag": "a", "attrs": {"href": os.environ["REPO_URL"]}, "children": ["Open repository"]},
-              ]},
-          ])
+          content.append({"tag": "hr"})
+          content.append({"tag": "p", "children": [
+              {"tag": "a", "attrs": {"href": os.environ["RUN_URL"]}, "children": ["Open build log"]},
+          ]})
 
           data = urllib.parse.urlencode({
               "access_token": token,
-              "title": "Shiney Kernel " + os.environ["KSU_TYPE"],
+              "title": "Shiney Kernel · SukiSU-Ultra",
               "author_name": "ShiningAsStar",
               "content": json.dumps(content, separators=(",", ":")),
               "return_content": "false",
@@ -613,29 +427,25 @@ jobs:
           try:
               with urllib.request.urlopen("https://api.telegra.ph/createPage", data=data, timeout=20) as response:
                   payload = json.loads(response.read().decode())
-              if payload.get("ok"):
-                  print(payload["result"]["url"])
-              else:
-                  print("")
+              print(payload["result"]["url"] if payload.get("ok") else "")
           except Exception:
               print("")
           PYEOF
           )"
 
           if [ -n "$TELEGRAPH_URL" ]; then
-            INFO_LINE="🧾 <a href=\"${TELEGRAPH_URL}\">Build details</a> · 🔍 <a href=\"${RUN_URL}\">Logs</a>"
+            INFO_LINE="🧾 <a href=\"${TELEGRAPH_URL}\">Details</a> · 🔍 <a href=\"${RUN_URL}\">Logs</a>"
           else
-            INFO_LINE="🔍 <a href=\"${RUN_URL}\">View build logs</a>"
+            INFO_LINE="🔍 <a href=\"${RUN_URL}\">View logs</a>"
           fi
 
-          CAPTION="✅ <b>Shiney Kernel is ready</b>
+          CAPTION="✅ <b>Shiney Kernel · SukiSU-Ultra</b>
 
-          📱 <b>Device:</b> <code>Redmi Note 13 (sapphire)</code>
-          ⚙️ <b>Kernel:</b> <code>${SPOOF_VER}-android13</code>
-          🔑 <b>Root:</b> <code>${KSU_TYPE}</code>
-          🛡️ <b>SUSFS:</b> <code>${{ github.event.inputs.SUSFS }}</code>
-          🚀 <b>Tune:</b> <code>-${{ github.event.inputs.optimizationLevel }} · ${{ github.event.inputs.tickRate }}Hz · LTO:${{ github.event.inputs.LtoOptimizations }}</code>
-          📅 <b>Built:</b> <code>${TIME_NOW}</code>
+          📱 <code>Redmi Note 13 (sapphire)</code>
+          ⚙️ <code>${SPOOF_VER}-android13</code>
+          🛡️ SUSFS: <code>${TG_SUSFS}</code>
+          🚀 <code>${TG_TUNE}</code>
+          📅 <code>${TIME_NOW}</code>
           ${INFO_LINE}"
 
           curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendDocument" \
@@ -651,20 +461,15 @@ jobs:
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_USER_ID }}
         run: |
           set -e
-
           DATE="$(TZ='UTC' date +'%Y-%m-%d %H:%M:%S UTC')"
-          REPO_URL="https://github.com/${{ github.repository }}"
-          RUN_URL="$REPO_URL/actions/runs/${{ github.run_id }}"
-          KSU_TYPE="${{ github.event.inputs.ksuVariant }}"
-          [ "${{ matrix.variant }}" = "noksu" ] && KSU_TYPE="noksu"
+          RUN_URL="https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
 
-          CAPTION="❌ <b>Shiney Kernel build failed</b>
+          CAPTION="❌ <b>Shiney Kernel · SukiSU-Ultra build failed</b>
 
-          📱 <b>Device:</b> <code>Redmi Note 13 (sapphire)</code>
-          🔑 <b>Variant:</b> <code>${KSU_TYPE}</code>
-          🔧 <b>Config:</b> <code>${{ github.event.inputs.kernelBranch }} · -${{ github.event.inputs.optimizationLevel }} · ${{ github.event.inputs.tickRate }}Hz</code>
-          📅 <b>Failed:</b> <code>${DATE}</code>
-          🔍 <a href=\"${RUN_URL}\">Open failure logs</a>"
+          📱 <code>Redmi Note 13 (sapphire)</code>
+          🔧 <code>${{ github.event.inputs.kernelBranch }} · -${{ github.event.inputs.optimizationLevel }} · ${{ github.event.inputs.tickRate }}Hz</code>
+          📅 <code>${DATE}</code>
+          🔍 <a href=\"${RUN_URL}\">Logs</a>"
 
           curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage" \
             -d chat_id="${TELEGRAM_CHAT_ID}" \
