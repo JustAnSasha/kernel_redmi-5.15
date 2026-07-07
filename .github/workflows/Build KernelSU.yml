@@ -377,7 +377,7 @@ jobs:
 
           def feat_bool(val, name):
               icon = "✅" if val == "true" else "❌"
-              return f"{icon} {name}"
+              return {"tag": "li", "children": [f"{icon} {name}"]}
 
           repo = os.environ["TG_REPO"]
           run_number = os.environ["TG_RUN_NUMBER"]
@@ -415,33 +415,7 @@ jobs:
               ]},
               {"tag": "hr"},
               {"tag": "h4", "children": ["⚙️ Optional Features"]},
-              {"tag": "ul", "children": [{"tag": "li", "children": [f] for f in features_list] if False else [{"tag": "li", "children": [f]} for f in features_list]},
-              {"tag": "hr"},
-              {"tag": "p", "children": [
-                  {"tag": "a", "attrs": {"href": run_url}, "children": ["🔗 GitHub Actions Run"]},
-                  "  |  ",
-                  {"tag": "a", "attrs": {"href": f"https://github.com/{repo}"}, "children": [f"📦 {repo}"]},
-              ]},
-          ]
-
-          # Correction: the list comprehension above was messy. Let's build properly:
-          content = [
-              {"tag": "h3", "children": ["Shiney Kernel · KernelSU"]},
-              {"tag": "p", "children": ["Build completed successfully."]},
-              {"tag": "hr"},
-              {"tag": "h4", "children": ["📋 Build Info"]},
-              {"tag": "ul", "children": [
-                  {"tag": "li", "children": [{"tag": "strong", "children": ["Device: "]}, esc(device)]},
-                  {"tag": "li", "children": [{"tag": "strong", "children": ["Kernel: "]}, esc(kernel_ver)]},
-                  {"tag": "li", "children": [{"tag": "strong", "children": ["Manager: "]}, "KernelSU"]},
-                  {"tag": "li", "children": [{"tag": "strong", "children": ["Branch: "]}, esc(branch)]},
-                  {"tag": "li", "children": [{"tag": "strong", "children": ["Tuning: "]}, f"{esc(optimization)} · {esc(tickrate)}Hz · LTO {esc(lto)}"]},
-                  {"tag": "li", "children": [{"tag": "strong", "children": ["Build #: "]}, esc(run_number)]},
-                  {"tag": "li", "children": [{"tag": "strong", "children": ["Time: "]}, esc(time_now)]},
-              ]},
-              {"tag": "hr"},
-              {"tag": "h4", "children": ["⚙️ Optional Features"]},
-              {"tag": "ul", "children": [{"tag": "li", "children": [f]} for f in features_list]},
+              {"tag": "ul", "children": features_list},
               {"tag": "hr"},
               {"tag": "p", "children": [
                   {"tag": "a", "attrs": {"href": run_url}, "children": ["🔗 GitHub Actions Run"]},
