@@ -1,4 +1,4 @@
-name: "Build Kernel (KernelSU)"
+name: "Build Kernel KernelSU"
 
 env:
   OUT_DIR: "out"

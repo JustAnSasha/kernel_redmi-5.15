@@ -1,4 +1,4 @@
-name: "Build Kernel (ReSuKiSU)"
+name: "Build Kernel ReSuKiSU"
 
 env:
   OUT_DIR: "out"

@@ -1,4 +1,4 @@
-name: "Build Kernel (KernelSU-Next)"
+name: "Build Kernel KernelSU-Next"
 
 env:
   OUT_DIR: "out"

@@ -9,10 +9,10 @@ on:
         required: true
         default: 'Build Kernel Only'
         options:
-          - Build Kernel (SukiSU-Ultra)
-          - Build Kernel (ReSuKiSU)
-          - Build Kernel (KernelSU)
-          - Build Kernel (KernelSU-Next)
+          - Build Kernel SukiSU-Ultra
+          - Build Kernel ReSuKiSU
+          - Build Kernel KernelSU
+          - Build Kernel KernelSU-Next
       count:
         description: 'Maximum number of runs to clean'
         required: false
