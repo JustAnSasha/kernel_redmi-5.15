@@ -228,14 +228,6 @@ jobs:
           rm -rf KernelSU-Next drivers/kernelsu
           curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/refs/heads/dev/kernel/setup.sh" | bash -s dev
 
-      - name: "🔧 Ensure KSU symlink exists"
-        working-directory: ./${{ env.kernelDir }}/${{ env.kernelName }}
-        run: |
-          if [ ! -d "drivers/kernelsu" ]; then
-            KSU_DIR=$(ls -d KernelSU* 2>/dev/null | head -1)
-            [ -n "$KSU_DIR" ] && ln -sf "$KSU_DIR" drivers/kernelsu
-          fi
-
       - name: "🧩 Setup SUSFS"
         if: github.event.inputs.SUSFS == 'true'
         working-directory: ./${{ env.kernelDir }}/${{ env.kernelName }}
@@ -258,7 +250,7 @@ jobs:
           rm -f susfs_kernel.patch
 
           echo "📦 [1/2] Applying KSU-side SUSFS enable patch..."
-          patch -p1 --forward --fuzz=3 -d drivers/kernelsu < susfs/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch || true
+          patch -p2 --forward --fuzz=3 -d drivers/kernelsu < susfs/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch || true
 
           FIX_DIR="wild_susfs_fix/next/susfs_fix_patches/stable/v2.2.0"
           echo "📦 [2/2] Applying WildKernels fix patches..."
@@ -272,7 +264,7 @@ jobs:
             ksu_toolkit.patch \
             overwrite_hook_mode.patch; do
             if [ -f "$FIX_DIR/$p" ]; then
-              patch -p1 --forward -d drivers/kernelsu < "$FIX_DIR/$p" && echo "  ✅ $p" || echo "  ⚠️ $p (skipped/conflict)"
+              patch -p2 --forward -d drivers/kernelsu < "$FIX_DIR/$p" && echo "  ✅ $p" || echo "  ⚠️ $p (skipped/conflict)"
             else
               echo "  ⚠️ $p not found"
             fi
