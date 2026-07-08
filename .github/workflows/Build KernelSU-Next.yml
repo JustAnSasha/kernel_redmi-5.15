@@ -243,7 +243,7 @@ jobs:
           rm -f susfs_kernel.patch
 
           echo "📦 [1/2] Applying KSU-side SUSFS enable patch..."
-          cd KernelSU-Next
+          cd drivers/kernelsu
           patch -p1 --forward --fuzz=3 < ../susfs/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch || true
 
           FIX_DIR="../wild_susfs_fix/next/susfs_fix_patches/v2.2.0"
