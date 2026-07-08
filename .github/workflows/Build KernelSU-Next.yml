@@ -221,6 +221,21 @@ jobs:
           echo "CONFIG_BBG=y" >> arch/arm64/configs/${{ env.DEFCONFIG_NAME }}
           sed -i '/^config LSM$/,/^help$/{ /^[[:space:]]*default/ { /baseband_guard/! s/selinux/selinux,baseband_guard/ } }' security/Kconfig
 
+      - name: "🔑 Setup KernelSU-Next"
+        working-directory: ./${{ env.kernelDir }}/${{ env.kernelName }}
+        run: |
+          set -e
+          rm -rf KernelSU-Next drivers/kernelsu
+          curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/refs/heads/dev/kernel/setup.sh" | bash -s dev
+
+      - name: "🔧 Ensure KSU symlink exists"
+        working-directory: ./${{ env.kernelDir }}/${{ env.kernelName }}
+        run: |
+          if [ ! -d "drivers/kernelsu" ]; then
+            KSU_DIR=$(ls -d KernelSU* 2>/dev/null | head -1)
+            [ -n "$KSU_DIR" ] && ln -sf "$KSU_DIR" drivers/kernelsu
+          fi
+
       - name: "🧩 Setup SUSFS"
         if: github.event.inputs.SUSFS == 'true'
         working-directory: ./${{ env.kernelDir }}/${{ env.kernelName }}
