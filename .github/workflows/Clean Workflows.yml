@@ -53,7 +53,7 @@ jobs:
           sudo apt-get install -y gh jq
 
       - name: 认证 GitHub CLI
-        run: echo "${{ secrets.GITHUB_TOKEN }}" | gh auth login --with-token
+        run: echo "${{ secrets.WORKFLOW_TOKEN }}" | gh auth login --with-token
 
       - name: 清理指定工作流及本工作流运行记录
         env:
