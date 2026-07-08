@@ -339,11 +339,12 @@ jobs:
           SPOOF_VER="${{ github.event.inputs.kernelSpoofVersion }}"
           [ -z "$SPOOF_VER" ] && SPOOF_VER="5.15"
           LOCAL_VERSION="${{ github.event.inputs.localVersion }}"
+          TIME_NOW="$(TZ='UTC' date +'%Y-%m-%d %H:%M:%S UTC')"
 
           TG_ZIP="/tmp/${{ env.ZIP_NAME }}.zip"
           (cd "${{ env.AK3_DIR }}" && zip -r9 "$TG_ZIP" ./)
 
-          export RUN_URL SPOOF_VER LOCAL_VERSION
+          export RUN_URL SPOOF_VER LOCAL_VERSION TIME_NOW
           export TG_REPO="${{ github.repository }}"
           export TG_RUN_NUMBER="${{ github.run_number }}"
           export TG_BRANCH="${{ github.event.inputs.kernelBranch }}"
@@ -388,7 +389,7 @@ jobs:
           lto = os.environ["TG_LTO"]
           bbg = os.environ["TG_BBG"]
           kpm = os.environ["TG_KPM"]
-          time_now = os.environ["TIME_NOW"] if "TIME_NOW" in os.environ else ""
+          time_now = os.environ.get("TIME_NOW", "")
           local_ver = os.environ.get("LOCAL_VERSION", "")
           clang = os.environ.get("TG_CLANG", "Clang")
           kernel_base = os.environ["TG_KERNEL_BASE"]
@@ -396,18 +397,19 @@ jobs:
           pkg = os.environ["TG_PACKAGE"]
           run_url = os.environ["RUN_URL"]
 
-          info_items = [
-              ("Kernel", kernel_base),
-              ("Android", android_ver),
-              ("Branch", branch),
-              ("Device", device),
-              ("Spoofed ver", kernel_ver),
-              ("Local version", local_ver) if local_ver else None,
-              ("Clang", clang),
-              ("Build #", run_n),
-              ("Time", time_now) if time_now else None,
-              ("Package", pkg),
-          ]
+          info_items = []
+          info_items.append(("Kernel", kernel_base))
+          info_items.append(("Android", android_ver))
+          info_items.append(("Branch", branch))
+          info_items.append(("Device", device))
+          info_items.append(("Spoofed ver", kernel_ver))
+          if local_ver:
+              info_items.append(("Local version", local_ver))
+          info_items.append(("Clang", clang))
+          info_items.append(("Build #", run_n))
+          if time_now:
+              info_items.append(("Time", time_now))
+          info_items.append(("Package", pkg))
 
           features = [
               feat_icon(susfs, "SuSFS"),
@@ -422,7 +424,7 @@ jobs:
               {"tag": "h4", "children": ["📋 Build Info"]},
               {"tag": "ul", "children": [
                   {"tag": "li", "children": [{"tag": "strong", "children": [f"{k}: "]}, esc(v)]}
-                  for k, v in info_items if v is not None
+                  for k, v in info_items
               ]},
               {"tag": "hr"},
               {"tag": "h4", "children": ["⚙️ Configuration"]},
