@@ -258,10 +258,9 @@ jobs:
           rm -f susfs_kernel.patch
 
           echo "📦 [1/2] Applying KSU-side SUSFS enable patch..."
-          cd drivers/kernelsu
-          patch -p1 --forward --fuzz=3 < ../susfs/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch || true
+          patch -p1 --forward --fuzz=3 -d drivers/kernelsu < susfs/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch || true
 
-          FIX_DIR="../wild_susfs_fix/next/susfs_fix_patches/v2.2.0"
+          FIX_DIR="wild_susfs_fix/next/susfs_fix_patches/stable/v2.2.0"
           echo "📦 [2/2] Applying WildKernels fix patches..."
           for p in \
             fix_Kbuild.patch \
@@ -273,13 +272,12 @@ jobs:
             ksu_toolkit.patch \
             overwrite_hook_mode.patch; do
             if [ -f "$FIX_DIR/$p" ]; then
-              patch -p1 --forward < "$FIX_DIR/$p" && echo "  ✅ $p" || echo "  ⚠️ $p (skipped/conflict)"
+              patch -p1 --forward -d drivers/kernelsu < "$FIX_DIR/$p" && echo "  ✅ $p" || echo "  ⚠️ $p (skipped/conflict)"
             else
               echo "  ⚠️ $p not found"
             fi
           done
 
-          cd ..
           rm -rf susfs wild_susfs_fix
           echo "✅ SUSFS setup complete"
 
