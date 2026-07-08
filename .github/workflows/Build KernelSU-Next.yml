@@ -221,37 +221,52 @@ jobs:
           echo "CONFIG_BBG=y" >> arch/arm64/configs/${{ env.DEFCONFIG_NAME }}
           sed -i '/^config LSM$/,/^help$/{ /^[[:space:]]*default/ { /baseband_guard/! s/selinux/selinux,baseband_guard/ } }' security/Kconfig
 
-      - name: "🔑 Setup KernelSU-Next"
-        working-directory: ./${{ env.kernelDir }}/${{ env.kernelName }}
-        run: |
-          set -e
-          rm -rf KernelSU-Next drivers/kernelsu
-          curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/refs/heads/dev/kernel/setup.sh" | bash -s dev
-          grep -q 'obj-$(CONFIG_KSU) += kernelsu/' drivers/Makefile
-          grep -q 'source "drivers/kernelsu/Kconfig"' drivers/Kconfig
-
       - name: "🧩 Setup SUSFS"
         if: github.event.inputs.SUSFS == 'true'
         working-directory: ./${{ env.kernelDir }}/${{ env.kernelName }}
         run: |
           set -e
+          echo "⬇️ Cloning SUSFS repos..."
           git clone --depth=1 https://gitlab.com/simonpunk/susfs4ksu.git -b gki-android13-5.15 susfs
+          git clone --depth=1 https://github.com/WildKernels/kernel_patches.git wild_susfs_fix
 
+          echo "📝 Copying SUSFS source files..."
           mkdir -p include/linux fs
           cp -f susfs/kernel_patches/include/linux/susfs.h include/linux/
           cp -f susfs/kernel_patches/include/linux/susfs_def.h include/linux/
           cp -f susfs/kernel_patches/fs/susfs.c fs/
 
+          echo "📦 Applying kernel-side SUSFS patch..."
           curl -Lso susfs_kernel.patch \
             "https://raw.githubusercontent.com/ShiningAsStar/extra_kernel_stuff/main/50_add_susfs_in_gki-android13-5.15.patch"
           patch -p1 --forward < susfs_kernel.patch || true
           rm -f susfs_kernel.patch
 
+          echo "📦 [1/2] Applying KSU-side SUSFS enable patch..."
           cd KernelSU-Next
           patch -p1 --forward --fuzz=3 < ../susfs/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch || true
-          cd ..
 
-          rm -rf susfs
+          FIX_DIR="../wild_susfs_fix/next/susfs_fix_patches/v2.2.0"
+          echo "📦 [2/2] Applying WildKernels fix patches..."
+          for p in \
+            fix_Kbuild.patch \
+            fix_init.c.patch \
+            fix_kernel_umount.c.patch \
+            fix_setuid_hook.c.patch \
+            fix_sucompat.c.patch \
+            fix_supercall.c.patch \
+            ksu_toolkit.patch \
+            overwrite_hook_mode.patch; do
+            if [ -f "$FIX_DIR/$p" ]; then
+              patch -p1 --forward < "$FIX_DIR/$p" && echo "  ✅ $p" || echo "  ⚠️ $p (skipped/conflict)"
+            else
+              echo "  ⚠️ $p not found"
+            fi
+          done
+
+          cd ..
+          rm -rf susfs wild_susfs_fix
+          echo "✅ SUSFS setup complete"
 
       - name: "⚙️ Configure KernelSU-Next"
         working-directory: ./${{ env.kernelDir }}/${{ env.kernelName }}

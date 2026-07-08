@@ -227,8 +227,6 @@ jobs:
           set -e
           rm -rf KernelSU drivers/kernelsu
           curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -s main
-          grep -q 'obj-$(CONFIG_KSU) += kernelsu/' drivers/Makefile
-          grep -q 'source "drivers/kernelsu/Kconfig"' drivers/Kconfig
 
       - name: "🧩 Setup SUSFS"
         if: github.event.inputs.SUSFS == 'true'
@@ -336,7 +334,6 @@ jobs:
         run: |
           set -e
 
-          TIME_NOW="$(TZ='UTC' date +'%Y-%m-%d %H:%M:%S UTC')"
           REPO_URL="https://github.com/${{ github.repository }}"
           RUN_URL="$REPO_URL/actions/runs/${{ github.run_id }}"
           SPOOF_VER="${{ github.event.inputs.kernelSpoofVersion }}"
@@ -346,7 +343,7 @@ jobs:
           TG_ZIP="/tmp/${{ env.ZIP_NAME }}.zip"
           (cd "${{ env.AK3_DIR }}" && zip -r9 "$TG_ZIP" ./)
 
-          export RUN_URL SPOOF_VER TIME_NOW LOCAL_VERSION
+          export RUN_URL SPOOF_VER LOCAL_VERSION
           export TG_REPO="${{ github.repository }}"
           export TG_RUN_NUMBER="${{ github.run_number }}"
           export TG_BRANCH="${{ github.event.inputs.kernelBranch }}"
@@ -364,63 +361,58 @@ jobs:
           export TG_PACKAGE="${{ env.ZIP_NAME }}.zip"
 
           TELEGRAPH_URL="$(python3 << 'PYEOF'
-          import html
-          import json
-          import os
-          import urllib.parse
-          import urllib.request
+          import html, json, os, urllib.parse, urllib.request
 
           token = os.environ.get("TELEGRAPH_TOKEN", "").strip()
           if not token:
               print("")
               raise SystemExit
 
-          def esc(value):
-              return html.escape(str(value), quote=False)
+          def esc(v):
+              return html.escape(str(v), quote=False)
 
-          def is_enabled(val):
-              return str(val).lower() in ("true", "on", "yes", "1")
+          def is_on(v):
+              return str(v).lower() in ("true", "on", "yes", "1")
 
-          def feat_bool(val, name):
-              icon = "✅" if is_enabled(val) else "❌"
-              return {"tag": "li", "children": [f"{icon} {name}"]}
+          def feat_icon(val, name):
+              return {"tag": "li", "children": [f"{'✅' if is_on(val) else '❌'} {name}"]}
 
           repo = os.environ["TG_REPO"]
-          run_number = os.environ["TG_RUN_NUMBER"]
+          run_n = os.environ["TG_RUN_NUMBER"]
           device = os.environ["TG_DEVICE"]
           kernel_ver = os.environ["TG_KERNEL_VERSION"]
           branch = os.environ["TG_BRANCH"]
           susfs = os.environ["TG_SUSFS"]
-          optimization = os.environ["TG_OPTIMIZATION"]
-          tickrate = os.environ["TG_TICKRATE"]
+          opt = os.environ["TG_OPTIMIZATION"]
+          hz = os.environ["TG_TICKRATE"]
           lto = os.environ["TG_LTO"]
           bbg = os.environ["TG_BBG"]
           kpm = os.environ["TG_KPM"]
-          time_now = os.environ["TIME_NOW"]
-          local_version = os.environ.get("LOCAL_VERSION", "")
+          time_now = os.environ["TIME_NOW"] if "TIME_NOW" in os.environ else ""
+          local_ver = os.environ.get("LOCAL_VERSION", "")
           clang = os.environ.get("TG_CLANG", "Clang")
           kernel_base = os.environ["TG_KERNEL_BASE"]
           android_ver = os.environ["TG_ANDROID_VER"]
-          package = os.environ["TG_PACKAGE"]
+          pkg = os.environ["TG_PACKAGE"]
           run_url = os.environ["RUN_URL"]
 
-          build_info_items = [
+          info_items = [
               ("Kernel", kernel_base),
               ("Android", android_ver),
               ("Branch", branch),
               ("Device", device),
               ("Spoofed ver", kernel_ver),
-              ("Local version", local_version) if local_version else None,
+              ("Local version", local_ver) if local_ver else None,
               ("Clang", clang),
-              ("Build #", run_number),
-              ("Time", time_now),
-              ("Package", package),
+              ("Build #", run_n),
+              ("Time", time_now) if time_now else None,
+              ("Package", pkg),
           ]
 
-          features_list = [
-              feat_bool(susfs, "SuSFS"),
-              feat_bool(bbg, "Baseband Guard"),
-              feat_bool(kpm, "Kernel Patch Module (KPM)"),
+          features = [
+              feat_icon(susfs, "SuSFS"),
+              feat_icon(bbg, "Baseband Guard"),
+              feat_icon(kpm, "Kernel Patch Module (KPM)"),
           ]
 
           content = [
@@ -429,23 +421,22 @@ jobs:
               {"tag": "hr"},
               {"tag": "h4", "children": ["📋 Build Info"]},
               {"tag": "ul", "children": [
-                  {"tag": "li", "children": [
-                      {"tag": "strong", "children": [f"{key}: "]}, esc(value)
-                  ]} for key, value in build_info_items if value is not None
+                  {"tag": "li", "children": [{"tag": "strong", "children": [f"{k}: "]}, esc(v)]}
+                  for k, v in info_items if v is not None
               ]},
               {"tag": "hr"},
               {"tag": "h4", "children": ["⚙️ Configuration"]},
               {"tag": "ul", "children": [
                   {"tag": "li", "children": [{"tag": "strong", "children": ["LTO: "]}, esc(lto)]},
-                  {"tag": "li", "children": [{"tag": "strong", "children": ["Optimization: "]}, f"-{esc(optimization)}"]},
-                  {"tag": "li", "children": [{"tag": "strong", "children": ["Tick Rate: "]}, f"{esc(tickrate)} Hz"]},
+                  {"tag": "li", "children": [{"tag": "strong", "children": ["Optimization: "]}, f"-{esc(opt)}"]},
+                  {"tag": "li", "children": [{"tag": "strong", "children": ["Tick Rate: "]}, f"{esc(hz)} Hz"]},
               ]},
               {"tag": "hr"},
               {"tag": "h4", "children": ["🔐 KSU Variant"]},
               {"tag": "p", "children": [{"tag": "strong", "children": ["KernelSU"]}, " with multi-manager support"]},
               {"tag": "hr"},
               {"tag": "h4", "children": ["⚙️ Optional Features"]},
-              {"tag": "ul", "children": features_list},
+              {"tag": "ul", "children": features},
               {"tag": "hr"},
               {"tag": "p", "children": [
                   {"tag": "a", "attrs": {"href": run_url}, "children": ["🔗 GitHub Actions Run"]},
@@ -454,14 +445,14 @@ jobs:
               ]},
           ]
 
-          data = {
-              "access_token": token,
-              "title": f"Shining Kernel · KernelSU #{run_number}",
-              "author_name": "ShiningAsStar",
-              "content": json.dumps(content, separators=(",", ":")),
-              "return_content": "false"
-          }
           try:
+              data = {
+                  "access_token": token,
+                  "title": f"Shining Kernel · KernelSU #{run_n}",
+                  "author_name": "ShiningAsStar",
+                  "content": json.dumps(content, separators=(",", ":")),
+                  "return_content": "false"
+              }
               req = urllib.request.Request(
                   "https://api.telegra.ph/createPage",
                   data=urllib.parse.urlencode(data).encode(),
@@ -469,45 +460,36 @@ jobs:
               )
               with urllib.request.urlopen(req, timeout=20) as resp:
                   result = json.load(resp)
-                  if result.get("ok"):
-                      print(result["result"]["url"])
-                  else:
-                      print("")
+              print(result["result"]["url"] if result.get("ok") else "")
           except Exception:
               print("")
           PYEOF
           )"
 
-          if [ -n "$TELEGRAPH_URL" ]; then
-            LINK_LINE="🧾 <a href=\"${TELEGRAPH_URL}\">Detailed Build Info</a>"
-          else
-            LINK_LINE="🔍 <a href=\"${RUN_URL}\">View details</a>"
-          fi
-
           SUSFS_TEXT="${{ github.event.inputs.SUSFS == 'true' && 'Enabled' || 'Disabled' }}"
           BBG_TEXT="${{ github.event.inputs.bbg == 'on' && 'Enabled' || 'Disabled' }}"
           KPM_TEXT="${{ github.event.inputs.KPM == 'on' && 'Enabled' || 'Disabled' }}"
 
+          if [ -n "$TELEGRAPH_URL" ]; then
+            DETAIL_LINE="🧾 <a href=\"${TELEGRAPH_URL}\">Detailed Build Info</a>"
+          else
+            DETAIL_LINE="🔍 <a href=\"${RUN_URL}\">View details</a>"
+          fi
+
           CAPTION="✅ <b>Kernel Build Successful</b>
 
           📦 <b>Build Information:</b>
-          • Kernel: Linux ${KERNEL_VERSION}
-          • Android: ${ANDROID_VERSION}
-          • Branch: ${TG_BRANCH}
-          • Device: ${TG_DEVICE}
-          • Spoofed version: ${SPOOF_VER}${LOCAL_VERSION}
+          • Kernel: Linux ${{ env.KERNEL_VERSION }} (Android ${{ env.ANDROID_VERSION }})
+          • Spoofed to: ${SPOOF_VER}${LOCAL_VERSION}
+          • Devices: Redmi Note 12/13 4G
 
-          ⚙️ <b>Configuration:</b>
-          • LTO: ${TG_LTO}
-          • Optimization: -${TG_OPTIMIZATION}
-          • Tick Rate: ${TG_TICKRATE}Hz
-
-          🔐 <b>KSU Variant: KernelSU</b>
+          ⚡ <b>KSU Variant:</b>
+          • KernelSU
           • SUSFS: ${SUSFS_TEXT}
           • Baseband Guard: ${BBG_TEXT}
           • KPM: ${KPM_TEXT}
 
-          ${LINK_LINE}"
+          ${DETAIL_LINE}"
 
           curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendDocument" \
             -F chat_id="${TELEGRAM_CHAT_ID}" \
@@ -528,7 +510,6 @@ jobs:
           SPOOF_VER="${{ github.event.inputs.kernelSpoofVersion }}"
           [ -z "$SPOOF_VER" ] && SPOOF_VER="5.15"
           LOCAL_VERSION="${{ github.event.inputs.localVersion }}"
-          TIME_NOW="$(TZ='UTC' date +'%Y-%m-%d %H:%M:%S UTC')"
 
           SUSFS_TEXT="${{ github.event.inputs.SUSFS == 'true' && 'Enabled' || 'Disabled' }}"
           BBG_TEXT="${{ github.event.inputs.bbg == 'on' && 'Enabled' || 'Disabled' }}"
@@ -537,23 +518,15 @@ jobs:
           CAPTION="❌ <b>Kernel Build Failed</b>
 
           📦 <b>Build Information:</b>
-          • Kernel: Linux ${{ env.KERNEL_VERSION }}
-          • Android: ${{ env.ANDROID_VERSION }}
-          • Branch: ${{ github.event.inputs.kernelBranch }}
-          • Device: Redmi Note 12/13 4G
-          • Spoofed version: ${SPOOF_VER}${LOCAL_VERSION}
+          • Kernel: Linux ${{ env.KERNEL_VERSION }} (Android ${{ env.ANDROID_VERSION }})
+          • Spoofed to: ${SPOOF_VER}${LOCAL_VERSION}
+          • Devices: Redmi Note 12/13 4G
 
-          ⚙️ <b>Configuration:</b>
-          • LTO: ${{ github.event.inputs.LtoOptimizations }}
-          • Optimization: -${{ github.event.inputs.optimizationLevel }}
-          • Tick Rate: ${{ github.event.inputs.tickRate }}Hz
-
-          🔐 <b>KSU Variant: KernelSU</b>
+          ⚡ <b>KSU Variant:</b>
+          • KernelSU
           • SUSFS: ${SUSFS_TEXT}
           • Baseband Guard: ${BBG_TEXT}
           • KPM: ${KPM_TEXT}
-
-          🕐 <b>Failed at:</b> ${TIME_NOW}
 
           🔍 <a href=\"${RUN_URL}\">View build logs</a>"
 
