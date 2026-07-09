@@ -1,0 +1,450 @@
+name: "Build Kernel Vanilla"
+
+env:
+  OUT_DIR: "out"
+  KERNEL_VERSION: "5.15"
+  ANDROID_VERSION: "13"
+
+on:
+  workflow_dispatch:
+    inputs:
+      kernelSourceURL:
+        description: "Kernel source URL"
+        required: true
+        type: string
+        default: "https://github.com/ShiningAsStar/kernel_redmi-5.15"
+      kernelBranch:
+        description: "Kernel branch"
+        required: true
+        type: choice
+        default: "shining"
+        options:
+          - "google"
+          - "shining"
+      kernelDevice:
+        description: "Device (used for defconfig)"
+        required: true
+        type: string
+        default: "gki"
+      kernelSpoofVersion:
+        description: "Spoof kernel version (X.Y.Z)"
+        required: false
+        type: string
+        default: "6.1.100"
+      localVersion:
+        description: "Custom localversion"
+        required: false
+        type: string
+        default: "-Shiney-Vanilla"
+      optimizationLevel:
+        description: "Compiler optimization level"
+        required: false
+        type: choice
+        default: "O3"
+        options:
+          - "O2"
+          - "O3"
+          - "Os"
+      tickRate:
+        description: "Kernel tick rate (Hz)"
+        required: false
+        type: choice
+        default: "250"
+        options:
+          - "default"
+          - "100"
+          - "250"
+          - "300"
+          - "500"
+          - "600"
+          - "750"
+          - "1000"
+      bbg:
+        description: "Baseband-guard"
+        required: true
+        type: choice
+        default: "on"
+        options:
+          - "on"
+          - "off"
+      LtoOptimizations:
+        description: "LTO type"
+        required: true
+        type: choice
+        default: "thin"
+        options:
+          - "thin"
+          - "full"
+
+jobs:
+  Build-Kernel:
+    name: "Build kernel Vanilla"
+    runs-on: ubuntu-latest
+    env:
+      kernelDir: common_${{ github.event.inputs.kernelDevice }}
+      kernelName: common
+      DEFCONFIG_NAME: ${{ github.event.inputs.kernelDevice }}_defconfig
+      WORK_DIR: ${{ github.workspace }}
+
+    steps:
+      - name: "🛠️ Prepare environment"
+        run: |
+          mkdir -p $kernelDir
+          echo "BUILD_TIME=$(date +'%Y-%m-%d')" >> $GITHUB_ENV
+          sudo apt-get update -qq
+          sudo apt-get install -y repo rsync aria2
+
+      - name: "🧹 Free up disk space"
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc "/usr/local/share/boost" "$AGENT_TOOLSDIRECTORY"
+          sudo docker image prune --all --force
+          sudo docker builder prune -a -f
+
+      - name: "💾 Configure 8GB swap"
+        uses: pierotofy/set-swap-space@master
+        with:
+          swap-size-gb: 8
+
+      - name: "⚙️ Set swappiness"
+        run: |
+          echo "vm.swappiness=80" | sudo tee -a /etc/sysctl.conf
+          sudo sysctl -p
+
+      - name: "📥 Clone kernel repository"
+        working-directory: ./${{ env.kernelDir }}
+        run: |
+          git clone --recursive --branch ${{ github.event.inputs.kernelBranch }} \
+            ${{ github.event.inputs.kernelSourceURL }} ${{ env.kernelName }} --depth=1
+
+      - name: "🏷️ Set custom kernel version"
+        working-directory: ./${{ env.kernelDir }}/${{ env.kernelName }}
+        run: |
+          SPOOF_VERSION="${{ github.event.inputs.kernelSpoofVersion }}"
+          LOCAL_VERSION="${{ github.event.inputs.localVersion }}"
+          FULL_VERSION="${SPOOF_VERSION}${LOCAL_VERSION}"
+          if [ -n "$SPOOF_VERSION" ]; then
+            sed -i "s/^KERNELVERSION =.*/KERNELVERSION = $FULL_VERSION/" Makefile
+            echo "" > .scmversion
+            sed -i 's/echo "\$res"/#echo "\$res"/g' scripts/setlocalversion
+            CONFIG_FILE="arch/arm64/configs/${{ env.DEFCONFIG_NAME }}"
+            sed -i '/CONFIG_LOCALVERSION/d; /CONFIG_LOCALVERSION_AUTO/d' "$CONFIG_FILE"
+            echo 'CONFIG_LOCALVERSION="'"$LOCAL_VERSION"'"' >> "$CONFIG_FILE"
+            echo "CONFIG_LOCALVERSION_AUTO=n" >> "$CONFIG_FILE"
+            [ -f "build.config.constants" ] && \
+              sed -i "s/^KERNEL_VERSION=.*/KERNEL_VERSION=$FULL_VERSION/" build.config.constants
+          fi
+
+      - name: "🔧 Init manifest and fetch Clang"
+        working-directory: ${{ env.WORK_DIR }}
+        run: |
+          repo init -u https://android.googlesource.com/kernel/manifest -b common-android13-5.15-lts --depth=1
+          repo sync -c --optimized-fetch --prune --no-clone-bundle --no-tags --force-sync --fail-fast -j$(nproc)
+          mkdir -p clang-19
+          aria2c -x16 -s16 -j16 -o clang.tar.gz \
+            "https://github.com/ZyCromerZ/Clang/releases/download/19.0.0git-20240723-release/Clang-19.0.0git-20240723.tar.gz"
+          tar -C clang-19 -zxf clang.tar.gz && rm clang.tar.gz
+          echo "CLANG_PATH=$(pwd)/clang-19" >> $GITHUB_ENV
+          KD="${{ env.kernelDir }}/${{ env.kernelName }}"
+          sed -i '/^DEFCONFIG=gki_defconfig/d' $KD/build.config.gki
+          sed -i '$a\DEFCONFIG=${{ env.DEFCONFIG_NAME }}' $KD/build.config.gki
+          sed -i '/^POST_DEFCONFIG_CMDS="check_defconfig"/d' $KD/build.config.gki
+          sed -i \
+            -e '/^KMI_SYMBOL_LIST_STRICT_MODE=/d' -e '/^TRIM_NONLISTED_KMI=/d' -e '/^KMI_ENFORCED=/d' \
+            -e '$a\KMI_SYMBOL_LIST_STRICT_MODE=0' -e '$a\TRIM_NONLISTED_KMI=0' -e '$a\KMI_ENFORCED=0' \
+            -e '/^MODULES_ORDER=/d' -e '/^MODULES_LIST=/d' \
+            $KD/build.config.gki.aarch64
+
+      - name: "⚡ Patch defconfig and tickrate"
+        working-directory: ./${{ env.kernelDir }}/${{ env.kernelName }}
+        run: |
+          CONFIG_FILE="arch/arm64/configs/${{ env.DEFCONFIG_NAME }}"
+          apply_patch() {
+            local url="$1" file
+            file=$(basename "$1")
+            curl -L -s -f -o "$file" "$url" || return 1
+            if patch -p1 --forward --dry-run < "$file" >/dev/null 2>&1; then
+              patch -p1 --forward < "$file"
+            fi
+            rm -f "$file"
+          }
+          apply_patch "https://raw.githubusercontent.com/ShiningAsStar/extra_kernel_stuff/main/custom-tickrate-options.patch"
+          find . -name "*.rej" -delete
+          sed -i '/CONFIG_CC_OPTIMIZE_FOR_PERFORMANCE\b/d; /CONFIG_CC_OPTIMIZE_FOR_PERFORMANCE_O3/d; /CONFIG_CC_OPTIMIZE_FOR_SIZE/d' "$CONFIG_FILE"
+          case "${{ github.event.inputs.optimizationLevel }}" in
+            O2) echo "CONFIG_CC_OPTIMIZE_FOR_PERFORMANCE=y"    >> "$CONFIG_FILE" ;;
+            O3) echo "CONFIG_CC_OPTIMIZE_FOR_PERFORMANCE_O3=y" >> "$CONFIG_FILE" ;;
+            Os) echo "CONFIG_CC_OPTIMIZE_FOR_SIZE=y"           >> "$CONFIG_FILE" ;;
+          esac
+          if [ "${{ github.event.inputs.tickRate }}" != "default" ]; then
+            TICK="${{ github.event.inputs.tickRate }}"
+            sed -i '/^CONFIG_HZ_/d; /^CONFIG_HZ=/d' "$CONFIG_FILE"
+            printf 'CONFIG_NO_HZ_IDLE=y\nCONFIG_HZ=%s\nCONFIG_HZ_%s=y\n' "$TICK" "$TICK" >> "$CONFIG_FILE"
+          fi
+          sed -i '/^CONFIG_LTO_CLANG/d; /^CONFIG_THINLTO/d' "$CONFIG_FILE"
+          if [ "${{ github.event.inputs.LtoOptimizations }}" = "thin" ]; then
+            printf 'CONFIG_LTO_CLANG=y\nCONFIG_LTO_CLANG_THIN=y\nCONFIG_THINLTO=y\n' >> "$CONFIG_FILE"
+          else
+            printf 'CONFIG_LTO_CLANG=y\nCONFIG_LTO_CLANG_FULL=y\n' >> "$CONFIG_FILE"
+          fi
+          printf 'CONFIG_STRIP_ASM_SYMS=y\nCONFIG_LD_DEAD_CODE_DATA_ELIMINATION=y\n' >> "$CONFIG_FILE"
+          cat >> "$CONFIG_FILE" << 'EOF'
+          CONFIG_TCP_CONG_ADVANCED=y
+          CONFIG_TCP_CONG_WESTWOOD=y
+          CONFIG_TCP_CONG_BBR=y
+          CONFIG_DEFAULT_WESTWOOD=y
+          CONFIG_NET_SCH_FQ=y
+          CONFIG_NET_SCH_FQ_CODEL=y
+          CONFIG_ZRAM=y
+          CONFIG_ZSMALLOC=y
+          CONFIG_CRYPTO_LZ4=y
+          CONFIG_CRYPTO_LZ4HC=y
+          CONFIG_CRYPTO_ZSTD=y
+          CONFIG_ZRAM_DEF_COMP_LZ4=y
+          CONFIG_TMPFS_XATTR=y
+          CONFIG_TMPFS_POSIX_ACL=y
+          CONFIG_PM_WAKELOCKS=y
+          CONFIG_PM_WAKELOCKS_GC=y
+          CONFIG_PM_WAKELOCKS_LIMIT=100
+          EOF
+          apply_patch "https://raw.githubusercontent.com/ShiningAsStar/kernel_patches/main/0001-scripts-sign-builds.patch"
+
+      - name: "🔒 Inject Baseband-guard"
+        if: github.event.inputs.bbg == 'on'
+        working-directory: ./${{ env.kernelDir }}/${{ env.kernelName }}
+        run: |
+          wget -qO- https://github.com/vc-teahouse/Baseband-guard/raw/main/setup.sh | bash
+          echo "CONFIG_BBG=y" >> arch/arm64/configs/${{ env.DEFCONFIG_NAME }}
+          sed -i '/^config LSM$/,/^help$/{ /^[[:space:]]*default/ { /baseband_guard/! s/selinux/selinux,baseband_guard/ } }' security/Kconfig
+
+      - name: "🔨 Compile kernel"
+        working-directory: ${{ env.WORK_DIR }}
+        run: |
+          export PATH=$CLANG_PATH/bin:$PATH
+          export KBUILD_BUILD_USER=ShiningAsStar
+          export KBUILD_BUILD_HOST=GitHub
+          BUILD_ARGS="CC=clang CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE=aarch64-linux-gnu-"
+          LTO=${{ github.event.inputs.LtoOptimizations }} \
+            BUILD_CONFIG=${{ env.kernelDir }}/${{ env.kernelName }}/build.config.gki.aarch64 \
+            build/build.sh -j$(nproc --all) $BUILD_ARGS
+
+      - name: "📦 Prepare AnyKernel3 package"
+        working-directory: ${{ env.WORK_DIR }}
+        run: |
+          BUILD_TIME=$(date +'%Y-%m-%d')
+          if [ ! -f out/dist/Image ]; then
+            echo "::error::Kernel Image not found!"
+            exit 1
+          fi
+          git clone --depth=1 https://github.com/ShiningAsStar/AnyKernel3 -b master AK3_Workspace
+          rm -rf AK3_Workspace/.git
+          cp out/dist/Image AK3_Workspace/Image
+          ZIP_NAME="Anykernel3_${{ github.event.inputs.kernelBranch }}_vanilla_${{ github.event.inputs.optimizationLevel }}_${{ github.event.inputs.tickRate }}hz_${BUILD_TIME}"
+          echo "ZIP_NAME=${ZIP_NAME}" >> $GITHUB_ENV
+          echo "AK3_DIR=$(pwd)/AK3_Workspace" >> $GITHUB_ENV
+
+      - name: "📤 Upload build artifact"
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.ZIP_NAME }}
+          path: ${{ env.AK3_DIR }}
+          compression-level: 9
+          retention-days: 3
+
+      - name: "📱 Send Telegram Notification"
+        if: success()
+        env:
+          TELEGRAPH_TOKEN: ${{ secrets.TELEGRAPH_TOKEN }}
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_USER_ID }}
+        run: |
+          set -e
+
+          REPO_URL="https://github.com/${{ github.repository }}"
+          RUN_URL="$REPO_URL/actions/runs/${{ github.run_id }}"
+          SPOOF_VER="${{ github.event.inputs.kernelSpoofVersion }}"
+          [ -z "$SPOOF_VER" ] && SPOOF_VER="5.15"
+          LOCAL_VERSION="${{ github.event.inputs.localVersion }}"
+          TIME_NOW="$(TZ='UTC' date +'%Y-%m-%d %H:%M:%S UTC')"
+
+          TG_ZIP="/tmp/${{ env.ZIP_NAME }}.zip"
+          (cd "${{ env.AK3_DIR }}" && zip -r9 "$TG_ZIP" ./)
+
+          export RUN_URL SPOOF_VER LOCAL_VERSION TIME_NOW
+          export TG_REPO="${{ github.repository }}"
+          export TG_RUN_NUMBER="${{ github.run_number }}"
+          export TG_BRANCH="${{ github.event.inputs.kernelBranch }}"
+          export TG_OPTIMIZATION="${{ github.event.inputs.optimizationLevel }}"
+          export TG_TICKRATE="${{ github.event.inputs.tickRate }}"
+          export TG_LTO="${{ github.event.inputs.LtoOptimizations }}"
+          export TG_BBG="${{ github.event.inputs.bbg }}"
+          export TG_DEVICE="Redmi Note 12/13 4G"
+          export TG_KERNEL_VERSION="${SPOOF_VER}-android13"
+          export TG_CLANG="ZyCromerZ Clang 19"
+          export TG_KERNEL_BASE="Linux ${{ env.KERNEL_VERSION }}"
+          export TG_ANDROID_VER="${{ env.ANDROID_VERSION }}"
+          export TG_PACKAGE="${{ env.ZIP_NAME }}.zip"
+
+          TELEGRAPH_URL="$(python3 << 'PYEOF'
+          import html, json, os, urllib.parse, urllib.request
+
+          token = os.environ.get("TELEGRAPH_TOKEN", "").strip()
+          if not token:
+              print("")
+              raise SystemExit
+
+          def esc(v):
+              return html.escape(str(v), quote=False)
+
+          def is_on(v):
+              return str(v).lower() in ("true", "on", "yes", "1")
+
+          def feat_icon(val, name):
+              return {"tag": "li", "children": [f"{'✅' if is_on(val) else '❌'} {name}"]}
+
+          repo = os.environ["TG_REPO"]
+          run_n = os.environ["TG_RUN_NUMBER"]
+          device = os.environ["TG_DEVICE"]
+          kernel_ver = os.environ["TG_KERNEL_VERSION"]
+          branch = os.environ["TG_BRANCH"]
+          opt = os.environ["TG_OPTIMIZATION"]
+          hz = os.environ["TG_TICKRATE"]
+          lto = os.environ["TG_LTO"]
+          bbg = os.environ["TG_BBG"]
+          time_now = os.environ.get("TIME_NOW", "")
+          local_ver = os.environ.get("LOCAL_VERSION", "")
+          clang = os.environ.get("TG_CLANG", "Clang")
+          kernel_base = os.environ["TG_KERNEL_BASE"]
+          android_ver = os.environ["TG_ANDROID_VER"]
+          pkg = os.environ["TG_PACKAGE"]
+          run_url = os.environ["RUN_URL"]
+
+          info_items = []
+          info_items.append(("Kernel", kernel_base))
+          info_items.append(("Android", android_ver))
+          info_items.append(("Branch", branch))
+          info_items.append(("Device", device))
+          info_items.append(("Spoofed ver", kernel_ver))
+          if local_ver:
+              info_items.append(("Local version", local_ver))
+          info_items.append(("Clang", clang))
+          info_items.append(("Build #", run_n))
+          if time_now:
+              info_items.append(("Time", time_now))
+          info_items.append(("Package", pkg))
+
+          features = [
+              feat_icon(bbg, "Baseband Guard"),
+          ]
+
+          content = [
+              {"tag": "h3", "children": ["Shining Kernel · Vanilla"]},
+              {"tag": "p", "children": ["Build completed successfully."]},
+              {"tag": "hr"},
+              {"tag": "h4", "children": ["📋 Build Info"]},
+              {"tag": "ul", "children": [
+                  {"tag": "li", "children": [{"tag": "strong", "children": [f"{k}: "]}, esc(v)]}
+                  for k, v in info_items
+              ]},
+              {"tag": "hr"},
+              {"tag": "h4", "children": ["⚙️ Configuration"]},
+              {"tag": "ul", "children": [
+                  {"tag": "li", "children": [{"tag": "strong", "children": ["LTO: "]}, esc(lto)]},
+                  {"tag": "li", "children": [{"tag": "strong", "children": ["Optimization: "]}, f"-{esc(opt)}"]},
+                  {"tag": "li", "children": [{"tag": "strong", "children": ["Tick Rate: "]}, f"{esc(hz)} Hz"]},
+              ]},
+              {"tag": "hr"},
+              {"tag": "h4", "children": ["⚙️ Optional Features"]},
+              {"tag": "ul", "children": features},
+              {"tag": "hr"},
+              {"tag": "p", "children": [
+                  {"tag": "a", "attrs": {"href": run_url}, "children": ["🔗 GitHub Actions Run"]},
+                  "  |  ",
+                  {"tag": "a", "attrs": {"href": f"https://github.com/{repo}"}, "children": [f"📦 {repo}"]},
+              ]},
+          ]
+
+          try:
+              data = {
+                  "access_token": token,
+                  "title": f"Shining Kernel · Vanilla #{run_n}",
+                  "author_name": "ShiningAsStar",
+                  "content": json.dumps(content, separators=(",", ":")),
+                  "return_content": "false"
+              }
+              req = urllib.request.Request(
+                  "https://api.telegra.ph/createPage",
+                  data=urllib.parse.urlencode(data).encode(),
+                  method="POST"
+              )
+              with urllib.request.urlopen(req, timeout=20) as resp:
+                  result = json.load(resp)
+              print(result["result"]["url"] if result.get("ok") else "")
+          except Exception:
+              print("")
+          PYEOF
+          )"
+
+          BBG_TEXT="${{ github.event.inputs.bbg == 'on' && 'Enabled' || 'Disabled' }}"
+
+          if [ -n "$TELEGRAPH_URL" ]; then
+            DETAIL_LINE="🧾 <a href=\"${TELEGRAPH_URL}\">Detailed Build Info</a>"
+          else
+            DETAIL_LINE="🔍 <a href=\"${RUN_URL}\">View details</a>"
+          fi
+
+          CAPTION="✅ <b>Kernel Build Successful</b>
+
+          📦 <b>Build Information:</b>
+          • Kernel: Linux ${{ env.KERNEL_VERSION }} (Android ${{ env.ANDROID_VERSION }})
+          • Spoofed to: ${SPOOF_VER}${LOCAL_VERSION}
+          • Devices: Redmi Note 12/13 4G
+
+          ⚙️ <b>Configuration:</b>
+          • LTO: ${{ github.event.inputs.LtoOptimizations }}
+          • Optimization: -${{ github.event.inputs.optimizationLevel }}
+          • Tick Rate: ${{ github.event.inputs.tickRate }}Hz
+          • Baseband Guard: ${BBG_TEXT}
+
+          ${DETAIL_LINE}"
+
+          curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendDocument" \
+            -F chat_id="${TELEGRAM_CHAT_ID}" \
+            -F document="@${TG_ZIP}" \
+            -F caption="${CAPTION}" \
+            -F parse_mode="HTML"
+
+      - name: "📱 Send Telegram Notification (Failure)"
+        if: failure()
+        env:
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_USER_ID }}
+        run: |
+          set -e
+
+          REPO_URL="https://github.com/${{ github.repository }}"
+          RUN_URL="$REPO_URL/actions/runs/${{ github.run_id }}"
+          SPOOF_VER="${{ github.event.inputs.kernelSpoofVersion }}"
+          [ -z "$SPOOF_VER" ] && SPOOF_VER="5.15"
+          LOCAL_VERSION="${{ github.event.inputs.localVersion }}"
+
+          BBG_TEXT="${{ github.event.inputs.bbg == 'on' && 'Enabled' || 'Disabled' }}"
+
+          CAPTION="❌ <b>Kernel Build Failed</b>
+
+          📦 <b>Build Information:</b>
+          • Kernel: Linux ${{ env.KERNEL_VERSION }} (Android ${{ env.ANDROID_VERSION }})
+          • Spoofed to: ${SPOOF_VER}${LOCAL_VERSION}
+          • Devices: Redmi Note 12/13 4G
+
+          ⚙️ <b>Configuration:</b>
+          • LTO: ${{ github.event.inputs.LtoOptimizations }}
+          • Optimization: -${{ github.event.inputs.optimizationLevel }}
+          • Tick Rate: ${{ github.event.inputs.tickRate }}Hz
+          • Baseband Guard: ${BBG_TEXT}
+
+          🔍 <a href=\"${RUN_URL}\">View build logs</a>"
+
+          curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage" \
+            -d chat_id="${TELEGRAM_CHAT_ID}" \
+            -d text="${CAPTION}" \
+            -d parse_mode="HTML"

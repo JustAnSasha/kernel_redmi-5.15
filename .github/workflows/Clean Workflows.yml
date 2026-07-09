@@ -14,6 +14,7 @@ on:
           - Build Kernel KernelSU
           - Build Kernel KernelSU-Next
           - Build Kernel KageSU
+          - Build Kernel Vanilla
       count:
         description: 'Maximum number of runs to clean'
         required: false
