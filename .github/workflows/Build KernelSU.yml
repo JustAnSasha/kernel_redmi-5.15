@@ -80,6 +80,22 @@ on:
         options:
           - "thin"
           - "full"
+      droidspaces:
+        description: "Droidspaces support"
+        required: true
+        type: choice
+        default: "off"
+        options:
+          - "on"
+          - "off"
+      spoofIntegrity:
+        description: "Spoof device state"
+        required: true
+        type: choice
+        default: "on"
+        options:
+          - "on"
+          - "off"
 
 jobs:
   Build-Kernel:
@@ -172,7 +188,7 @@ jobs:
             fi
             rm -f "$file"
           }
-          apply_patch "https://raw.githubusercontent.com/ShiningAsStar/extra_kernel_stuff/main/custom-tickrate-options.patch"
+          apply_patch "https://raw.githubusercontent.com/ShiningAsStar/extra_kernel_stuff/main/patches/custom-tickrate-options.patch"
           find . -name "*.rej" -delete
           sed -i '/CONFIG_CC_OPTIMIZE_FOR_PERFORMANCE\b/d; /CONFIG_CC_OPTIMIZE_FOR_PERFORMANCE_O3/d; /CONFIG_CC_OPTIMIZE_FOR_SIZE/d' "$CONFIG_FILE"
           case "${{ github.event.inputs.optimizationLevel }}" in
@@ -211,7 +227,6 @@ jobs:
           CONFIG_PM_WAKELOCKS_GC=y
           CONFIG_PM_WAKELOCKS_LIMIT=100
           EOF
-          apply_patch "https://raw.githubusercontent.com/ShiningAsStar/kernel_patches/main/0001-scripts-sign-builds.patch"
 
       - name: "🔒 Inject Baseband-guard"
         if: github.event.inputs.bbg == 'on'
@@ -221,12 +236,42 @@ jobs:
           echo "CONFIG_BBG=y" >> arch/arm64/configs/${{ env.DEFCONFIG_NAME }}
           sed -i '/^config LSM$/,/^help$/{ /^[[:space:]]*default/ { /baseband_guard/! s/selinux/selinux,baseband_guard/ } }' security/Kconfig
 
+      - name: "🚀 Add Droidspaces Support"
+        if: github.event.inputs.droidspaces == 'on'
+        working-directory: ./${{ env.kernelDir }}/${{ env.kernelName }}
+        run: |
+          curl -sL "https://raw.githubusercontent.com/ravindu644/Droidspaces-OSS/main/Documentation/resources/kernel-patches/GKI/below-kernel-6.12/001.GKI-below-6.12-fix_sysvipc_kabi_6_7_8.patch" | git apply -v --ignore-whitespace
+
+      - name: "🧩 Apply Integrity Spoof"
+        if: github.event.inputs.spoofIntegrity == 'on'
+        working-directory: ./${{ env.kernelDir }}/${{ env.kernelName }}
+        run: |
+          curl -Lso spoof-integrity.patch \
+            "https://raw.githubusercontent.com/ShiningAsStar/extra_kernel_stuff/main/patches/spoof-kernel-integrity.patch"
+          patch -p1 --forward < spoof-integrity.patch || true
+          rm -f spoof-integrity.patch
+
       - name: "🔑 Setup KernelSU"
         working-directory: ./${{ env.kernelDir }}/${{ env.kernelName }}
         run: |
           set -e
           rm -rf KernelSU drivers/kernelsu
           curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -s main
+          cd KernelSU
+          KSU_VERSION_COUNT=$(git rev-list --count HEAD)
+          export KSUVER=$(expr $KSU_VERSION_COUNT + 11300)
+          echo "KSUVER=$KSUVER" >> $GITHUB_ENV
+          KSU_API_VERSION=$(grep -E "^KSU_VERSION[[:space:]]*=" "../Makefile" | cut -d'=' -f2 | tr -d '[:space:]')
+          [ -z "$KSU_API_VERSION" ] && KSU_API_VERSION="11800"
+          KSU_COMMIT_HASH=$(git rev-parse --short=8 HEAD)
+          KBUILD_FILE="kernel/Makefile"
+          [ -f "kernel/Kbuild" ] && KBUILD_FILE="kernel/Kbuild"
+          sed -i 's/-DKSU_VERSION_FULL=[^ ]*//g' "$KBUILD_FILE"
+          sed -i '/KSU_VERSION_FULL/d' "$KBUILD_FILE"
+          cat >> "$KBUILD_FILE" <<EOF
+          ccflags-y += -DKSU_VERSION_FULL=\"v${KSU_API_VERSION}-${KSU_COMMIT_HASH}@shiney\"
+          EOF
+          echo "✅ KernelSU $KSUVER (v${KSU_API_VERSION}-${KSU_COMMIT_HASH}@shiney)"
 
       - name: "🧩 Setup SUSFS"
         if: github.event.inputs.SUSFS == 'true'
@@ -241,7 +286,7 @@ jobs:
           cp -f susfs/kernel_patches/fs/susfs.c fs/
 
           curl -Lso susfs_kernel.patch \
-            "https://raw.githubusercontent.com/ShiningAsStar/extra_kernel_stuff/main/50_add_susfs_in_gki-android13-5.15.patch"
+            "https://raw.githubusercontent.com/ShiningAsStar/extra_kernel_stuff/main/patches/50_add_susfs_in_gki-android13-5.15.patch"
           patch -p1 --forward < susfs_kernel.patch || true
           rm -f susfs_kernel.patch
 
@@ -313,7 +358,7 @@ jobs:
           git clone --depth=1 https://github.com/ShiningAsStar/AnyKernel3 -b master AK3_Workspace
           rm -rf AK3_Workspace/.git
           cp out/dist/Image AK3_Workspace/Image
-          ZIP_NAME="Anykernel3_${{ github.event.inputs.kernelBranch }}_kernelsu_${{ github.event.inputs.optimizationLevel }}_${{ github.event.inputs.tickRate }}hz_${BUILD_TIME}"
+          ZIP_NAME="KernelSU_AK3_${{ github.event.inputs.kernelBranch }}_${BUILD_TIME}"
           echo "ZIP_NAME=${ZIP_NAME}" >> $GITHUB_ENV
           echo "AK3_DIR=$(pwd)/AK3_Workspace" >> $GITHUB_ENV
 
@@ -322,7 +367,6 @@ jobs:
         with:
           name: ${{ env.ZIP_NAME }}
           path: ${{ env.AK3_DIR }}
-          compression-level: 9
           retention-days: 3
 
       - name: "📱 Send Telegram Notification"
@@ -353,7 +397,8 @@ jobs:
           export TG_TICKRATE="${{ github.event.inputs.tickRate }}"
           export TG_LTO="${{ github.event.inputs.LtoOptimizations }}"
           export TG_BBG="${{ github.event.inputs.bbg }}"
-          export TG_KPM="${{ github.event.inputs.KPM }}"
+          export TG_DROIDSPACES="${{ github.event.inputs.droidspaces }}"
+          export TG_SPOOF="${{ github.event.inputs.spoofIntegrity }}"
           export TG_DEVICE="Redmi Note 12/13 4G"
           export TG_KERNEL_VERSION="${SPOOF_VER}-android13"
           export TG_CLANG="ZyCromerZ Clang 19"
@@ -388,7 +433,8 @@ jobs:
           hz = os.environ["TG_TICKRATE"]
           lto = os.environ["TG_LTO"]
           bbg = os.environ["TG_BBG"]
-          kpm = os.environ["TG_KPM"]
+          droidspaces = os.environ["TG_DROIDSPACES"]
+          spoof = os.environ["TG_SPOOF"]
           time_now = os.environ.get("TIME_NOW", "")
           local_ver = os.environ.get("LOCAL_VERSION", "")
           clang = os.environ.get("TG_CLANG", "Clang")
@@ -414,7 +460,8 @@ jobs:
           features = [
               feat_icon(susfs, "SuSFS"),
               feat_icon(bbg, "Baseband Guard"),
-              feat_icon(kpm, "Kernel Patch Module (KPM)"),
+              feat_icon(droidspaces, "Droidspaces"),
+              feat_icon(spoof, "Integrity Spoof"),
           ]
 
           content = [
@@ -435,10 +482,17 @@ jobs:
               ]},
               {"tag": "hr"},
               {"tag": "h4", "children": ["🔐 KSU Variant"]},
-              {"tag": "p", "children": [{"tag": "strong", "children": ["KernelSU"]}, " with multi-manager support"]},
+              {"tag": "p", "children": [{"tag": "strong", "children": ["KernelSU"]}]},
               {"tag": "hr"},
               {"tag": "h4", "children": ["⚙️ Optional Features"]},
               {"tag": "ul", "children": features},
+              {"tag": "hr"},
+              {"tag": "h4", "children": ["📥 Installation"]},
+              {"tag": "ol", "children": [
+                  {"tag": "li", "children": ["Flash AnyKernel3 zip via TWRP or KernelFlasher"]},
+                  {"tag": "li", "children": ["Install metamodule: mountify / meta-overlayfs / meta-magicmount"]},
+                  {"tag": "li", "children": ["I'm not responsible for bricked devices / losen data or other things"]},
+              ]},
               {"tag": "hr"},
               {"tag": "p", "children": [
                   {"tag": "a", "attrs": {"href": run_url}, "children": ["🔗 GitHub Actions Run"]},
@@ -470,7 +524,8 @@ jobs:
 
           SUSFS_TEXT="${{ github.event.inputs.SUSFS == 'true' && 'Enabled' || 'Disabled' }}"
           BBG_TEXT="${{ github.event.inputs.bbg == 'on' && 'Enabled' || 'Disabled' }}"
-          KPM_TEXT="${{ github.event.inputs.KPM == 'on' && 'Enabled' || 'Disabled' }}"
+          DROID_TEXT="${{ github.event.inputs.droidspaces == 'on' && 'Enabled' || 'Disabled' }}"
+          SPOOF_TEXT="${{ github.event.inputs.spoofIntegrity == 'on' && 'Enabled' || 'Disabled' }}"
 
           if [ -n "$TELEGRAPH_URL" ]; then
             DETAIL_LINE="🧾 <a href=\"${TELEGRAPH_URL}\">Detailed Build Info</a>"
@@ -489,7 +544,8 @@ jobs:
           • KernelSU
           • SUSFS: ${SUSFS_TEXT}
           • Baseband Guard: ${BBG_TEXT}
-          • KPM: ${KPM_TEXT}
+          • Droidspaces: ${DROID_TEXT}
+          • Integrity Spoof: ${SPOOF_TEXT}
 
           ${DETAIL_LINE}"
 
@@ -515,7 +571,8 @@ jobs:
 
           SUSFS_TEXT="${{ github.event.inputs.SUSFS == 'true' && 'Enabled' || 'Disabled' }}"
           BBG_TEXT="${{ github.event.inputs.bbg == 'on' && 'Enabled' || 'Disabled' }}"
-          KPM_TEXT="${{ github.event.inputs.KPM == 'on' && 'Enabled' || 'Disabled' }}"
+          DROID_TEXT="${{ github.event.inputs.droidspaces == 'on' && 'Enabled' || 'Disabled' }}"
+          SPOOF_TEXT="${{ github.event.inputs.spoofIntegrity == 'on' && 'Enabled' || 'Disabled' }}"
 
           CAPTION="❌ <b>Kernel Build Failed</b>
 
@@ -528,7 +585,8 @@ jobs:
           • KernelSU
           • SUSFS: ${SUSFS_TEXT}
           • Baseband Guard: ${BBG_TEXT}
-          • KPM: ${KPM_TEXT}
+          • Droidspaces: ${DROID_TEXT}
+          • Integrity Spoof: ${SPOOF_TEXT}
 
           🔍 <a href=\"${RUN_URL}\">View build logs</a>"
 
