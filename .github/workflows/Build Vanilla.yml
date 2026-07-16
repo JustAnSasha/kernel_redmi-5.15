@@ -118,7 +118,11 @@ jobs:
 
       - name: "💾 Add swap space"
         run: |
-          sudo fallocate -l 8G /swapfile
+          if [ -f /swapfile ]; then
+            sudo swapoff /swapfile 2>/dev/null || true
+            sudo rm -f /swapfile
+          fi
+          sudo dd if=/dev/zero of=/swapfile bs=1M count=8192 status=progress
           sudo chmod 600 /swapfile
           sudo mkswap /swapfile
           sudo swapon /swapfile
