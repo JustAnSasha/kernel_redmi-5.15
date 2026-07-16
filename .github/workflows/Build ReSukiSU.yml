@@ -123,23 +123,20 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y repo rsync aria2
 
-      - name: "🧹 Free up disk space"
+      - name: "🗑️ Free disk space"
         run: |
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc "/usr/local/share/boost" "$AGENT_TOOLSDIRECTORY"
           sudo docker image prune --all --force
           sudo docker builder prune -a -f
 
-      - name: "💾 Configure 8GB swap"
-        uses: pierotofy/set-swap-space@master
-        with:
-          swap-size-gb: 8
-
-      - name: "⚙️ Set swappiness"
+      - name: "💾 Add swap space"
         run: |
-          echo "vm.swappiness=80" | sudo tee -a /etc/sysctl.conf
-          sudo sysctl -p
+          sudo fallocate -l 8G /swapfile
+          sudo chmod 600 /swapfile
+          sudo mkswap /swapfile
+          sudo swapon /swapfile
 
-      - name: "📥 Clone kernel repository"
+      - name: "📥 Clone kernel source"
         working-directory: ./${{ env.kernelDir }}
         run: |
           git clone --recursive --branch ${{ github.event.inputs.kernelBranch }} \
@@ -163,7 +160,7 @@ jobs:
               sed -i "s/^KERNEL_VERSION=.*/KERNEL_VERSION=$FULL_VERSION/" build.config.constants
           fi
 
-      - name: "🔧 Init manifest and fetch Clang"
+      - name: "🔧 Init build tools & get Clang"
         working-directory: ${{ env.WORK_DIR }}
         run: |
           repo init -u https://android.googlesource.com/kernel/manifest -b common-android13-5.15-lts --depth=1
@@ -183,7 +180,7 @@ jobs:
             -e '/^MODULES_ORDER=/d' -e '/^MODULES_LIST=/d' \
             $KD/build.config.gki.aarch64
 
-      - name: "⚡ Patch defconfig and tickrate"
+      - name: "⚡ Configure defconfig & optimizations"
         working-directory: ./${{ env.kernelDir }}/${{ env.kernelName }}
         run: |
           CONFIG_FILE="arch/arm64/configs/${{ env.DEFCONFIG_NAME }}"
@@ -236,7 +233,7 @@ jobs:
           CONFIG_PM_WAKELOCKS_LIMIT=100
           EOF
 
-      - name: "🔒 Inject Baseband-guard"
+      - name: "🔒 Add Baseband-guard"
         if: github.event.inputs.bbg == 'on'
         working-directory: ./${{ env.kernelDir }}/${{ env.kernelName }}
         run: |
@@ -244,13 +241,13 @@ jobs:
           echo "CONFIG_BBG=y" >> arch/arm64/configs/${{ env.DEFCONFIG_NAME }}
           sed -i '/^config LSM$/,/^help$/{ /^[[:space:]]*default/ { /baseband_guard/! s/selinux/selinux,baseband_guard/ } }' security/Kconfig
 
-      - name: "🚀 Add Droidspaces Support"
+      - name: "🚀 Droidspaces support"
         if: github.event.inputs.droidspaces == 'on'
         working-directory: ./${{ env.kernelDir }}/${{ env.kernelName }}
         run: |
           curl -sL "https://raw.githubusercontent.com/ravindu644/Droidspaces-OSS/main/Documentation/resources/kernel-patches/GKI/below-kernel-6.12/001.GKI-below-6.12-fix_sysvipc_kabi_6_7_8.patch" | git apply -v --ignore-whitespace
 
-      - name: "🧩 Apply Integrity Spoof"
+      - name: "🧩 Integrity spoof"
         if: github.event.inputs.spoofIntegrity == 'on'
         working-directory: ./${{ env.kernelDir }}/${{ env.kernelName }}
         run: |
@@ -372,19 +369,19 @@ jobs:
           fi
           git clone --depth=1 https://github.com/ShiningAsStar/AnyKernel3 -b master AK3_Workspace
           rm -rf AK3_Workspace/.git
-          cp out/dist/Image AK3_Workspace/Image
+          cp out/dist/Image AK3_Workspace/Image.ReSukiSU
           ZIP_NAME="ReSukiSU_AK3_${{ github.event.inputs.kernelBranch }}_${BUILD_TIME}"
           echo "ZIP_NAME=${ZIP_NAME}" >> $GITHUB_ENV
           echo "AK3_DIR=$(pwd)/AK3_Workspace" >> $GITHUB_ENV
 
-      - name: "📤 Upload build artifact"
+      - name: "📤 Upload artifact"
         uses: actions/upload-artifact@v4
         with:
           name: ${{ env.ZIP_NAME }}
           path: ${{ env.AK3_DIR }}
           retention-days: 3
 
-      - name: "📱 Send Telegram Notification"
+      - name: "📱 Notify success"
         if: success()
         env:
           TELEGRAPH_TOKEN: ${{ secrets.TELEGRAPH_TOKEN }}
@@ -575,7 +572,7 @@ jobs:
             -F caption="${CAPTION}" \
             -F parse_mode="HTML"
 
-      - name: "📱 Send Telegram Notification (Failure)"
+      - name: "📱 Notify failure"
         if: failure()
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
