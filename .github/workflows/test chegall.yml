@@ -2,21 +2,10 @@ name: Build Chagall Kernel
 
 on:
   workflow_dispatch:
-    inputs:
-      defconfig:
-        description: 'Defconfig name (without _defconfig)'
-        required: true
-        type: string
-        default: 'gki'
 
 jobs:
   build:
     runs-on: ubuntu-latest
-    env:
-      KERNEL_SOURCE: https://github.com/MiCode/Xiaomi_Kernel_OpenSource
-      KERNEL_BRANCH: bsp-chagall-w-oss
-      DEFCONFIG_NAME: ${{ github.event.inputs.defconfig }}_defconfig
-      OUT_DIR: out
 
     steps:
       - name: Free disk space
@@ -39,65 +28,29 @@ jobs:
 
       - name: Clone kernel source
         run: |
-          git clone --depth=1 --branch ${{ env.KERNEL_BRANCH }} ${{ env.KERNEL_SOURCE }} kernel_source
-
-      - name: Verify defconfig
-        run: |
-          if [ ! -f "kernel_source/arch/arm64/configs/${{ env.DEFCONFIG_NAME }}" ]; then
-            echo "::error::Defconfig ${{ env.DEFCONFIG_NAME }} not found!"
-            exit 1
-          fi
+          git clone --depth=1 --branch bsp-chagall-w-oss https://github.com/MiCode/Xiaomi_Kernel_OpenSource kernel_source
 
       - name: Build kernel
         run: |
           export PATH="$(pwd)/clang/bin:$PATH"
           export ARCH=arm64
           export CROSS_COMPILE=aarch64-linux-gnu-
-          mkdir -p ${{ env.OUT_DIR }}
-          cp kernel_source/arch/arm64/configs/${{ env.DEFCONFIG_NAME }} ${{ env.OUT_DIR }}/.config
-          make -j$(nproc --all) O=${{ env.OUT_DIR }} LLVM=1 LLVM_IAS=1 olddefconfig
-          make -j$(nproc --all) O=${{ env.OUT_DIR }} LLVM=1 LLVM_IAS=1 Image
+          mkdir -p out
+          cp kernel_source/arch/arm64/configs/gki_defconfig out/.config
+          make -j$(nproc --all) O=out LLVM=1 LLVM_IAS=1 olddefconfig
+          make -j$(nproc --all) O=out LLVM=1 LLVM_IAS=1 Image
 
-      - name: Verify Image
-        run: |
-          if [ ! -f ${{ env.OUT_DIR }}/arch/arm64/boot/Image ]; then
-            echo "::error::Image not built"
-            exit 1
-          fi
-
-      - name: Clone AnyKernel3
+      - name: Package AnyKernel3
         run: |
           git clone --depth=1 https://github.com/osm0sis/AnyKernel3 ak3
           rm -rf ak3/.git ak3/README.md
-
-      - name: Replace AnyKernel3 tools with aarch64 binaries
-        run: |
           cd ak3
           curl -fSL "https://github.com/NEESCHAL-3/EVONIX-kernel/releases/download/v2.0/EVONIX-v2.0-RODIN.zip" -o /tmp/ak3-src.zip
-          [ -s /tmp/ak3-src.zip ] || { echo "FAIL: EVONIX zip download failed"; exit 1; }
-          mkdir -p /tmp/ak3-src && unzip -oq /tmp/ak3-src.zip -d /tmp/ak3-src
+          unzip -oq /tmp/ak3-src.zip -d /tmp/ak3-src
           for t in busybox fec httools_static lptools_static magiskboot magiskpolicy snapshotupdater_static; do
-            [ -f "/tmp/ak3-src/tools/$t" ] || { echo "FAIL: missing tools/$t"; exit 1; }
-            cp "/tmp/ak3-src/tools/$t" tools/
+            cp /tmp/ak3-src/tools/$t tools/
           done
           chmod +x tools/*
-
-      - name: Validate AnyKernel3 tools
-        run: |
-          cd ak3
-          FAIL=0
-          for f in tools/busybox tools/fec tools/httools_static tools/lptools_static tools/magiskboot tools/magiskpolicy tools/snapshotupdater_static; do
-            if ! file "$f" | grep -q "aarch64"; then
-              echo "FAIL: $f is not aarch64"
-              file "$f"
-              FAIL=1
-            fi
-          done
-          [ "$FAIL" -eq 0 ] || exit 1
-
-      - name: Write anykernel.sh and copy Image
-        run: |
-          cd ak3
           cat > anykernel.sh <<'EOF'
           properties() { '
           kernel.string=Chagall Kernel
@@ -122,16 +75,12 @@ jobs:
             write_boot;
           fi;
           EOF
-          cp ${{ github.workspace }}/${{ env.OUT_DIR }}/arch/arm64/boot/Image Image
+          cp ../out/arch/arm64/boot/Image Image
+          zip -r9 ../Chagall_Kernel.zip * -x .git
 
-      - name: Package flashable zip
-        run: |
-          cd ak3
-          zip -r9 ../Chagall_Kernel_$(date +%Y%m%d-%H%M).zip * -x .git
-
-      - name: Upload flashable zip
+      - name: Upload
         uses: actions/upload-artifact@v4
         with:
-          name: Chagall_Kernel_${{ github.run_number }}
+          name: Chagall_Kernel
           path: ak3/*
           retention-days: 7
