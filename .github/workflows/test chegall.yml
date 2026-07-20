@@ -1,4 +1,4 @@
-name: Build Chagall Kernel (Clean - No Cache)
+name: Build Chagall Kernel
 
 on:
   workflow_dispatch:
@@ -7,7 +7,7 @@ on:
         description: 'Defconfig name (without _defconfig)'
         required: true
         type: string
-        default: 'gki'               # gki_defconfig
+        default: 'gki'
 
 jobs:
   build:
@@ -19,78 +19,119 @@ jobs:
       OUT_DIR: out
 
     steps:
-      - name: Prepare environment
+      - name: Free disk space
         run: |
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/share/boost /usr/lib/jvm
           sudo docker image prune -af || true
           sudo docker builder prune -af || true
-          sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends git libelf-dev cmake rsync zip curl
 
-      - name: Download Clang (ZyCromerZ 19)
+      - name: Install dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends git make gcc libelf-dev libssl-dev bc flex bison rsync zip curl
+
+      - name: Download Clang
         run: |
           mkdir -p clang
-          echo "Downloading Clang..."
-          curl -L --retry 5 -o /tmp/clang.tar.gz \
-            "https://github.com/ZyCromerZ/Clang/releases/download/19.0.0git-20240723-release/Clang-19.0.0git-20240723.tar.gz"
+          curl -L --retry 5 -o /tmp/clang.tar.gz "https://github.com/ZyCromerZ/Clang/releases/download/19.0.0git-20240723-release/Clang-19.0.0git-20240723.tar.gz"
           tar -C clang -zxf /tmp/clang.tar.gz
           rm /tmp/clang.tar.gz
 
       - name: Clone kernel source
         run: |
-          git clone --depth=1 --branch ${{ env.KERNEL_BRANCH }} \
-            ${{ env.KERNEL_SOURCE }} kernel_source
+          git clone --depth=1 --branch ${{ env.KERNEL_BRANCH }} ${{ env.KERNEL_SOURCE }} kernel_source
 
-      - name: Verify defconfig exists
-        working-directory: kernel_source
+      - name: Verify defconfig
         run: |
-          if [ ! -f "arch/arm64/configs/${{ env.DEFCONFIG_NAME }}" ]; then
+          if [ ! -f "kernel_source/arch/arm64/configs/${{ env.DEFCONFIG_NAME }}" ]; then
             echo "::error::Defconfig ${{ env.DEFCONFIG_NAME }} not found!"
             exit 1
           fi
-          echo "✅ Defconfig ${{ env.DEFCONFIG_NAME }} found"
 
       - name: Build kernel
         run: |
           export PATH="$(pwd)/clang/bin:$PATH"
           export ARCH=arm64
           export CROSS_COMPILE=aarch64-linux-gnu-
-
           mkdir -p ${{ env.OUT_DIR }}
-
-          # Use cp + olddefconfig instead of make *_defconfig
           cp kernel_source/arch/arm64/configs/${{ env.DEFCONFIG_NAME }} ${{ env.OUT_DIR }}/.config
+          make -j$(nproc --all) O=${{ env.OUT_DIR }} LLVM=1 LLVM_IAS=1 olddefconfig
+          make -j$(nproc --all) O=${{ env.OUT_DIR }} LLVM=1 LLVM_IAS=1 Image
 
-          make -j$(nproc --all) \
-            O=${{ env.OUT_DIR }} \
-            LLVM=1 LLVM_IAS=1 \
-            olddefconfig
-
-          make -j$(nproc --all) \
-            O=${{ env.OUT_DIR }} \
-            LLVM=1 LLVM_IAS=1 \
-            Image
-
-      - name: Verify build output
+      - name: Verify Image
         run: |
           if [ ! -f ${{ env.OUT_DIR }}/arch/arm64/boot/Image ]; then
-            echo "::error::Kernel Image not generated!"
+            echo "::error::Image not built"
             exit 1
           fi
-          echo "✅ Kernel Image built successfully"
 
-      - name: Package AnyKernel3
+      - name: Clone AnyKernel3
         run: |
-          git clone --depth=1 https://github.com/osm0sis/AnyKernel3 AK3
-          rm -rf AK3/.git
-          cp ${{ env.OUT_DIR }}/arch/arm64/boot/Image AK3/Image
-          ZIP_NAME="Chagall_GKI_$(date +%Y%m%d-%H%M).zip"
-          (cd AK3 && zip -r9 "../$ZIP_NAME" .)
-          echo "ZIP_NAME=$ZIP_NAME" >> $GITHUB_ENV
+          git clone --depth=1 https://github.com/osm0sis/AnyKernel3 ak3
+          rm -rf ak3/.git ak3/README.md
 
-      - name: Upload artifact
+      - name: Replace AnyKernel3 tools with aarch64 binaries
+        run: |
+          cd ak3
+          curl -fSL "https://github.com/NEESCHAL-3/EVONIX-kernel/releases/download/v2.0/EVONIX-v2.0-RODIN.zip" -o /tmp/ak3-src.zip
+          [ -s /tmp/ak3-src.zip ] || { echo "FAIL: EVONIX zip download failed"; exit 1; }
+          mkdir -p /tmp/ak3-src && unzip -oq /tmp/ak3-src.zip -d /tmp/ak3-src
+          for t in busybox fec httools_static lptools_static magiskboot magiskpolicy snapshotupdater_static; do
+            [ -f "/tmp/ak3-src/tools/$t" ] || { echo "FAIL: missing tools/$t"; exit 1; }
+            cp "/tmp/ak3-src/tools/$t" tools/
+          done
+          chmod +x tools/*
+
+      - name: Validate AnyKernel3 tools
+        run: |
+          cd ak3
+          FAIL=0
+          for f in tools/busybox tools/fec tools/httools_static tools/lptools_static tools/magiskboot tools/magiskpolicy tools/snapshotupdater_static; do
+            if ! file "$f" | grep -q "aarch64"; then
+              echo "FAIL: $f is not aarch64"
+              file "$f"
+              FAIL=1
+            fi
+          done
+          [ "$FAIL" -eq 0 ] || exit 1
+
+      - name: Write anykernel.sh and copy Image
+        run: |
+          cd ak3
+          cat > anykernel.sh <<'EOF'
+          properties() { '
+          kernel.string=Chagall Kernel
+          do.devicecheck=0
+          do.modules=0
+          do.systemless=1
+          do.cleanup=1
+          do.cleanuponabort=0
+          supported.versions=15-16
+          '; }
+          block=boot;
+          is_slot_device=auto;
+          ramdisk_compression=auto;
+          patch_vbmeta_flag=auto;
+          no_magisk_check=1;
+          . tools/ak3-core.sh;
+          if [ -L "/dev/block/bootdevice/by-name/init_boot_a" ] || [ -L "/dev/block/by-name/init_boot_a" ]; then
+            split_boot;
+            flash_boot;
+          else
+            dump_boot;
+            write_boot;
+          fi;
+          EOF
+          cp ${{ github.workspace }}/${{ env.OUT_DIR }}/arch/arm64/boot/Image Image
+
+      - name: Package flashable zip
+        run: |
+          cd ak3
+          zip -r9 ../Chagall_Kernel_$(date +%Y%m%d-%H%M).zip * -x .git
+
+      - name: Upload flashable zip
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ env.ZIP_NAME }}
-          path: ${{ env.ZIP_NAME }}
-          retention-days: 3
+          name: Chagall_Kernel_${{ github.run_number }}
+          path: ak3/*
+          retention-days: 7
