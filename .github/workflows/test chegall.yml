@@ -25,7 +25,7 @@ jobs:
           sudo docker image prune -af || true
           sudo docker builder prune -af || true
           sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends git libelf-dev cmake rsync zip
+          sudo apt-get install -y --no-install-recommends git libelf-dev cmake rsync zip curl
 
       - name: Download Clang (ZyCromerZ 19)
         run: |
@@ -35,7 +35,6 @@ jobs:
             "https://github.com/ZyCromerZ/Clang/releases/download/19.0.0git-20240723-release/Clang-19.0.0git-20240723.tar.gz"
           tar -C clang -zxf /tmp/clang.tar.gz
           rm /tmp/clang.tar.gz
-          echo "Clang downloaded and extracted"
 
       - name: Clone kernel source
         run: |
@@ -59,10 +58,13 @@ jobs:
 
           mkdir -p ${{ env.OUT_DIR }}
 
+          # Use cp + olddefconfig instead of make *_defconfig
+          cp kernel_source/arch/arm64/configs/${{ env.DEFCONFIG_NAME }} ${{ env.OUT_DIR }}/.config
+
           make -j$(nproc --all) \
             O=${{ env.OUT_DIR }} \
             LLVM=1 LLVM_IAS=1 \
-            ${{ env.DEFCONFIG_NAME }}
+            olddefconfig
 
           make -j$(nproc --all) \
             O=${{ env.OUT_DIR }} \
