@@ -1,0 +1,95 @@
+name: Build Chagall Kernel (Clean - No Cache)
+
+on:
+  workflow_dispatch:
+    inputs:
+      defconfig:
+        description: 'Defconfig name (without _defconfig)'
+        required: true
+        type: string
+        default: 'gki'               # GKI defconfig
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      KERNEL_SOURCE: https://github.com/MiCode/Xiaomi_Kernel_OpenSource
+      KERNEL_BRANCH: bsp-chagall-w-oss
+      DEFCONFIG_NAME: ${{ github.event.inputs.defconfig }}_defconfig
+      OUT_DIR: out
+
+    steps:
+      - name: Prepare environment
+        run: |
+          # Free up disk space (remove unused tools)
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/share/boost /usr/lib/jvm
+          sudo docker image prune -af || true
+          sudo docker builder prune -af || true
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends git aria2 libelf-dev cmake rsync zip
+
+      - name: Download Clang (ZyCromerZ 19)
+        run: |
+          mkdir -p clang
+          aria2c -x16 -s16 -k1M -j16 -o /tmp/clang.tar.gz \
+            "https://github.com/ZyCromerZ/Clang/releases/download/19.0.0git-20240723-release/Clang-19.0.0git-20240723.tar.gz"
+          tar -C clang -zxf /tmp/clang.tar.gz
+          rm /tmp/clang.tar.gz
+
+      - name: Clone kernel source
+        run: |
+          git clone --depth=1 --branch ${{ env.KERNEL_BRANCH }} \
+            ${{ env.KERNEL_SOURCE }} kernel_source
+
+      - name: Verify defconfig exists
+        working-directory: kernel_source
+        run: |
+          if [ ! -f "arch/arm64/configs/${{ env.DEFCONFIG_NAME }}" ]; then
+            echo "::error::Defconfig ${{ env.DEFCONFIG_NAME }} not found!"
+            exit 1
+          fi
+          echo "✅ Defconfig ${{ env.DEFCONFIG_NAME }} found"
+
+      - name: Build kernel
+        run: |
+          export PATH="$(pwd)/clang/bin:$PATH"
+          export ARCH=arm64
+          export CROSS_COMPILE=aarch64-linux-gnu-
+
+          mkdir -p ${{ env.OUT_DIR }}
+
+          # Generate .config from gki_defconfig
+          make -j$(nproc --all) \
+            O=${{ env.OUT_DIR }} \
+            LLVM=1 LLVM_IAS=1 \
+            ${{ env.DEFCONFIG_NAME }}
+
+          # Build the kernel Image
+          make -j$(nproc --all) \
+            O=${{ env.OUT_DIR }} \
+            LLVM=1 LLVM_IAS=1 \
+            Image
+
+      - name: Verify build output
+        run: |
+          if [ ! -f ${{ env.OUT_DIR }}/arch/arm64/boot/Image ]; then
+            echo "::error::Kernel Image not generated!"
+            exit 1
+          fi
+          echo "✅ Kernel Image built successfully"
+
+      - name: Package AnyKernel3
+        run: |
+          git clone --depth=1 https://github.com/osm0sis/AnyKernel3 AK3
+          rm -rf AK3/.git
+          cp ${{ env.OUT_DIR }}/arch/arm64/boot/Image AK3/Image
+          ZIP_NAME="Chagall_GKI_$(date +%Y%m%d-%H%M).zip"
+          (cd AK3 && zip -r9 "../$ZIP_NAME" .)
+          echo "ZIP_NAME=$ZIP_NAME" >> $GITHUB_ENV
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.ZIP_NAME }}
+          path: ${{ env.ZIP_NAME }}
+          retention-days: 3
