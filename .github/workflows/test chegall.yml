@@ -7,7 +7,7 @@ on:
         description: 'Defconfig name (without _defconfig)'
         required: true
         type: string
-        default: 'gki'               # GKI defconfig
+        default: 'gki'               # gki_defconfig
 
 jobs:
   build:
@@ -21,20 +21,29 @@ jobs:
     steps:
       - name: Prepare environment
         run: |
-          # Free up disk space (remove unused tools)
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/share/boost /usr/lib/jvm
           sudo docker image prune -af || true
           sudo docker builder prune -af || true
           sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends git aria2 libelf-dev cmake rsync zip
+          sudo apt-get install -y --no-install-recommends git libelf-dev cmake rsync zip
+
+      - name: Add swap space
+        run: |
+          sudo fallocate -l 8G /swapfile || sudo dd if=/dev/zero of=/swapfile bs=1M count=8192
+          sudo chmod 600 /swapfile
+          sudo mkswap /swapfile
+          sudo swapon /swapfile
+          free -h
 
       - name: Download Clang (ZyCromerZ 19)
         run: |
           mkdir -p clang
-          aria2c -x16 -s16 -k1M -j16 -o /tmp/clang.tar.gz \
+          echo "Downloading Clang..."
+          curl -L --retry 5 -o /tmp/clang.tar.gz \
             "https://github.com/ZyCromerZ/Clang/releases/download/19.0.0git-20240723-release/Clang-19.0.0git-20240723.tar.gz"
           tar -C clang -zxf /tmp/clang.tar.gz
           rm /tmp/clang.tar.gz
+          echo "Clang downloaded and extracted"
 
       - name: Clone kernel source
         run: |
@@ -58,13 +67,11 @@ jobs:
 
           mkdir -p ${{ env.OUT_DIR }}
 
-          # Generate .config from gki_defconfig
           make -j$(nproc --all) \
             O=${{ env.OUT_DIR }} \
             LLVM=1 LLVM_IAS=1 \
             ${{ env.DEFCONFIG_NAME }}
 
-          # Build the kernel Image
           make -j$(nproc --all) \
             O=${{ env.OUT_DIR }} \
             LLVM=1 LLVM_IAS=1 \
