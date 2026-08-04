@@ -258,26 +258,6 @@ jobs:
             BUILD_CONFIG=${{ env.kernelDir }}/${{ env.kernelName }}/build.config.gki.aarch64 \
             build/build.sh -j$(nproc --all) $BUILD_ARGS
 
-      - name: "📦 Build system_dlkm.img"
-        working-directory: ${{ env.WORK_DIR }}
-        run: |
-          STAGING_DIR="$(pwd)/modules_staging"
-          rm -rf "$STAGING_DIR"
-          mkdir -p "$STAGING_DIR/lib/modules"
-
-          if ls out/dist/*.ko 1> /dev/null 2>&1; then
-            cp out/dist/*.ko "$STAGING_DIR/lib/modules/"
-          fi
-          
-          cp out/dist/modules.* "$STAGING_DIR/lib/modules/" 2>/dev/null || true
-
-          mkfs.erofs -z lz4hc,9 \
-            --file-contexts=${{ env.WORK_DIR }}/build/make/tools/releasetools/file_contexts \
-            --mount-point=/system_dlkm \
-            out/dist/system_dlkm.img "$STAGING_DIR"
-
-          echo "Just done yk"
-
       - name: "📦 Prepare AnyKernel3 package"
         working-directory: ${{ env.WORK_DIR }}
         run: |
