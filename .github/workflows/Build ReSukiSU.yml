@@ -30,12 +30,12 @@ on:
         description: "Spoof kernel version (X.Y.Z)"
         required: false
         type: string
-        default: "6.1.100"
+        default: ""
       localVersion:
         description: "Custom localversion"
         required: false
         type: string
-        default: "-Shiney"
+        default: ""
       SUSFS:
         description: "Enable SuSFS"
         required: true
@@ -45,8 +45,9 @@ on:
         description: "Compiler optimization level"
         required: false
         type: choice
-        default: "O3"
+        default: "default"
         options:
+          - "default"
           - "O2"
           - "O3"
           - "Os"
@@ -54,7 +55,7 @@ on:
         description: "Kernel tick rate (Hz)"
         required: false
         type: choice
-        default: "250"
+        default: "default"
         options:
           - "default"
           - "100"
@@ -88,6 +89,11 @@ on:
         options:
           - "ZyCromerZ"
           - "AOSP"
+      hyperOSMode:
+        description: "Use HyperOS compatibility settings"
+        required: true
+        type: boolean
+        default: false
       KPM:
         description: "Kernel Patch Module"
         required: true
@@ -177,6 +183,7 @@ jobs:
         run: |
           repo init -u https://android.googlesource.com/kernel/manifest -b common-android13-5.15-lts --depth=1
           repo sync -c --optimized-fetch --prune --no-clone-bundle --no-tags --force-sync --fail-fast -j$(nproc)
+          rm -rf .repo common
           if [ "${{ github.event.inputs.clang }}" = "AOSP" ]; then
             mkdir -p prebuilts/clang/host/linux-x86/clang-r584948b
             aria2c -x16 -s16 -j16 -o clang.tar.gz "https://github.com/topnotchfreaks/clang/releases/download/v1.0.0/clang-r584948b.tar.gz"
@@ -232,7 +239,8 @@ jobs:
             printf 'CONFIG_LTO_CLANG=y\nCONFIG_LTO_CLANG_FULL=y\n' >> "$CONFIG_FILE"
           fi
           printf 'CONFIG_STRIP_ASM_SYMS=y\nCONFIG_LD_DEAD_CODE_DATA_ELIMINATION=y\n' >> "$CONFIG_FILE"
-          cat >> "$CONFIG_FILE" << 'EOF'
+          if [ "${{ github.event.inputs.hyperOSMode }}" != "true" ]; then
+            cat >> "$CONFIG_FILE" << 'EOF'
           CONFIG_TCP_CONG_ADVANCED=y
           CONFIG_TCP_CONG_WESTWOOD=y
           CONFIG_TCP_CONG_BBR=y
@@ -251,9 +259,10 @@ jobs:
           CONFIG_PM_WAKELOCKS_GC=y
           CONFIG_PM_WAKELOCKS_LIMIT=100
           EOF
+          fi
 
       - name: "🔒 Add Baseband-guard"
-        if: github.event.inputs.bbg == 'on'
+        if: github.event.inputs.bbg == 'on' && github.event.inputs.hyperOSMode != 'true'
         working-directory: ./${{ env.kernelDir }}/${{ env.kernelName }}
         run: |
           wget -qO- https://github.com/vc-teahouse/Baseband-guard/raw/main/setup.sh | bash
@@ -261,13 +270,13 @@ jobs:
           sed -i '/^config LSM$/,/^help$/{ /^[[:space:]]*default/ { /baseband_guard/! s/selinux/selinux,baseband_guard/ } }' security/Kconfig
 
       - name: "🚀 Droidspaces support"
-        if: github.event.inputs.droidspaces == 'on'
+        if: github.event.inputs.droidspaces == 'on' && github.event.inputs.hyperOSMode != 'true'
         working-directory: ./${{ env.kernelDir }}/${{ env.kernelName }}
         run: |
           curl -sL "https://raw.githubusercontent.com/ravindu644/Droidspaces-OSS/main/Documentation/resources/kernel-patches/GKI/below-kernel-6.12/001.GKI-below-6.12-fix_sysvipc_kabi_6_7_8.patch" | git apply -v --ignore-whitespace
 
       - name: "🧩 Integrity spoof"
-        if: github.event.inputs.spoofIntegrity == 'on'
+        if: github.event.inputs.spoofIntegrity == 'on' && github.event.inputs.hyperOSMode != 'true'
         working-directory: ./${{ env.kernelDir }}/${{ env.kernelName }}
         run: |
           curl -Lso spoof-integrity.patch \
@@ -336,8 +345,8 @@ jobs:
 
           if [ "${{ github.event.inputs.SUSFS }}" = "true" ]; then
             cat >> "$CONFIG_FILE" << 'EOF'
-          CONFIG_KSU_TRACEPOINT_HOOK is not set
-          CONFIG_KSU_MANUAL_HOOK is not set
+          # CONFIG_KSU_TRACEPOINT_HOOK is not set
+          # CONFIG_KSU_MANUAL_HOOK is not set
           EOF
             cat >> "$CONFIG_FILE" << 'EOF'
           CONFIG_KSU_SUSFS=y
@@ -371,7 +380,7 @@ jobs:
             build/build.sh -j$(nproc --all) $BUILD_ARGS
 
       - name: "🧩 Apply KPM patch"
-        if: github.event.inputs.KPM == 'on'
+        if: github.event.inputs.KPM == 'on' && github.event.inputs.hyperOSMode != 'true'
         working-directory: ${{ env.WORK_DIR }}/out/dist
         run: |
           curl -fL -s -o patch_linux https://github.com/SukiSU-Ultra/SukiSU_KernelPatch_patch/releases/download/0.13.0/patch_linux
