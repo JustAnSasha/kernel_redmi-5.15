@@ -50,6 +50,14 @@ on:
           - "O2"
           - "O3"
           - "Os"
+      clangVersion:
+        description: "Clang toolchain"
+        required: true
+        type: choice
+        default: "ZyCromerZ"
+        options:
+          - "ZyCromerZ"
+          - "AOSP"
       tickRate:
         description: "Kernel tick rate (Hz)"
         required: false
@@ -80,14 +88,6 @@ on:
         options:
           - "thin"
           - "full"
-      clang:
-        description: "Compiler toolchain"
-        required: true
-        type: choice
-        default: "ZyCromerZ"
-        options:
-          - "ZyCromerZ"
-          - "AOSP"
       KPM:
         description: "Kernel Patch Module"
         required: true
@@ -177,19 +177,28 @@ jobs:
         run: |
           repo init -u https://android.googlesource.com/kernel/manifest -b common-android13-5.15-lts --depth=1
           repo sync -c --optimized-fetch --prune --no-clone-bundle --no-tags --force-sync --fail-fast -j$(nproc)
-          if [ "${{ github.event.inputs.clang }}" = "AOSP" ]; then
-            mkdir -p prebuilts/clang/host/linux-x86/clang-r584948b
-            aria2c -x16 -s16 -j16 -o clang.tar.gz "https://github.com/topnotchfreaks/clang/releases/download/v1.0.0/clang-r584948b.tar.gz"
-            tar -C prebuilts/clang/host/linux-x86/clang-r584948b -zxf clang.tar.gz && rm clang.tar.gz
-            sed -i 's/^BRANCH=.*/BRANCH=android13-5.15/;s/^CLANG_VERSION=.*/CLANG_VERSION=r584948b/' "${{ env.kernelDir }}/${{ env.kernelName }}/build.config.constants"
-            echo "CLANG_PATH=$(pwd)/prebuilts/clang/host/linux-x86/clang-r584948b" >> $GITHUB_ENV
+          KD="${{ env.kernelDir }}/${{ env.kernelName }}"
+          if [ "${{ github.event.inputs.clangVersion }}" = "AOSP" ]; then
+            rm -rf .repo common
+            aria2c -x16 -s16 -j16 -o clang-r596125.tar.gz \
+              "https://github.com/yougotme101/clang/releases/download/v1.0.1/clang-r596125.tar.gz"
+            mkdir -p prebuilts/clang/host/linux-x86/clang-r596125
+            tar -xzf clang-r596125.tar.gz -C prebuilts/clang/host/linux-x86/clang-r596125
+            rm -f clang-r596125.tar.gz
+            rm -rf prebuilts/clang/host/linux-x86/clang-3289846
+            rm -rf prebuilts/clang/host/linux-x86/clang-r450784e
+            rm -rf prebuilts/clang/host/linux-x86/clang-r547379
+            rm -rf prebuilts/clang/host/linux-x86/clang-stable
+            sed -i -e 's/^BRANCH=.*/BRANCH=android13-5.15/' \
+              -e 's/^CLANG_VERSION=.*/CLANG_VERSION=r596125/' \
+              $KD/build.config.constants
           else
             mkdir -p clang-19
-            aria2c -x16 -s16 -j16 -o clang.tar.gz "https://github.com/ZyCromerZ/Clang/releases/download/19.0.0git-20240723-release/Clang-19.0.0git-20240723.tar.gz"
+            aria2c -x16 -s16 -j16 -o clang.tar.gz \
+              "https://github.com/ZyCromerZ/Clang/releases/download/19.0.0git-20240723-release/Clang-19.0.0git-20240723.tar.gz"
             tar -C clang-19 -zxf clang.tar.gz && rm clang.tar.gz
             echo "CLANG_PATH=$(pwd)/clang-19" >> $GITHUB_ENV
           fi
-          KD="${{ env.kernelDir }}/${{ env.kernelName }}"
           sed -i '/^DEFCONFIG=gki_defconfig/d' $KD/build.config.gki
           sed -i '$a\DEFCONFIG=${{ env.DEFCONFIG_NAME }}' $KD/build.config.gki
           sed -i '/^POST_DEFCONFIG_CMDS="check_defconfig"/d' $KD/build.config.gki
@@ -360,13 +369,19 @@ jobs:
       - name: "🔨 Compile kernel"
         working-directory: ${{ env.WORK_DIR }}
         run: |
-          export PATH=$CLANG_PATH/bin:$PATH
-          export KBUILD_BUILD_USER=ShiningAsStar
-          export KBUILD_BUILD_HOST=GitHub
-          BUILD_ARGS="CC=clang CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE=aarch64-linux-gnu-"
-          LTO=${{ github.event.inputs.LtoOptimizations }} \
-            BUILD_CONFIG=${{ env.kernelDir }}/${{ env.kernelName }}/build.config.gki.aarch64 \
-            build/build.sh -j$(nproc --all) $BUILD_ARGS
+          if [ "${{ github.event.inputs.clangVersion }}" = "AOSP" ]; then
+            LTO=${{ github.event.inputs.LtoOptimizations }} \
+              BUILD_CONFIG=${{ env.kernelDir }}/${{ env.kernelName }}/build.config.gki.aarch64 \
+              build/build.sh -j$(nproc --all)
+          else
+            export PATH=$CLANG_PATH/bin:$PATH
+            export KBUILD_BUILD_USER=ShiningAsStar
+            export KBUILD_BUILD_HOST=GitHub
+            BUILD_ARGS="CC=clang CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE=aarch64-linux-gnu-"
+            LTO=${{ github.event.inputs.LtoOptimizations }} \
+              BUILD_CONFIG=${{ env.kernelDir }}/${{ env.kernelName }}/build.config.gki.aarch64 \
+              build/build.sh -j$(nproc --all) $BUILD_ARGS
+          fi
 
       - name: "🧩 Apply KPM patch"
         if: github.event.inputs.KPM == 'on'
@@ -431,7 +446,7 @@ jobs:
           export TG_SPOOF="${{ github.event.inputs.spoofIntegrity }}"
           export TG_DEVICE="Redmi Note 12/13 4G"
           export TG_KERNEL_VERSION="${SPOOF_VER}-android13"
-          export TG_CLANG="${{ github.event.inputs.clang }} Clang"
+          export TG_CLANG="${{ github.event.inputs.clangVersion == 'AOSP' && 'AOSP Clang r596125' || 'ZyCromerZ Clang 19' }}"
           export TG_KERNEL_BASE="Linux ${{ env.KERNEL_VERSION }}"
           export TG_ANDROID_VER="${{ env.ANDROID_VERSION }}"
           export TG_PACKAGE="${{ env.ZIP_NAME }}.zip"
@@ -556,38 +571,46 @@ jobs:
 
           SUSFS_TEXT="${{ github.event.inputs.SUSFS == 'true' && 'Enabled' || 'Disabled' }}"
           BBG_TEXT="${{ github.event.inputs.bbg == 'on' && 'Enabled' || 'Disabled' }}"
-          KPM_TEXT="${{ github.event.inputs.KPM == 'on' && 'Enabled' || 'Disabled' }}"
-          DROID_TEXT="${{ github.event.inputs.droidspaces == 'on' && 'Enabled' || 'Disabled' }}"
-          SPOOF_TEXT="${{ github.event.inputs.spoofIntegrity == 'on' && 'Enabled' || 'Disabled' }}"
+          CLANG_TEXT="${{ github.event.inputs.clangVersion == 'AOSP' && 'AOSP Clang r596125' || 'ZyCromerZ Clang 19' }}"
 
           if [ -n "$TELEGRAPH_URL" ]; then
             DETAIL_LINE="🧾 <a href=\"${TELEGRAPH_URL}\">Detailed Build Info</a>"
           else
             DETAIL_LINE="🔍 <a href=\"${RUN_URL}\">View details</a>"
           fi
-
           CAPTION="✅ <b>Kernel Build Successful</b>
 
           📦 <b>Build Information:</b>
           • Kernel: Linux ${{ env.KERNEL_VERSION }} (Android ${{ env.ANDROID_VERSION }})
           • Spoofed to: ${SPOOF_VER}${LOCAL_VERSION}
           • Devices: Redmi Note 12/13 4G
-
           ⚡ <b>KSU Variant:</b>
           • KageSU
           • SUSFS: ${SUSFS_TEXT}
           • Baseband Guard: ${BBG_TEXT}
-          • KPM: ${KPM_TEXT}
-          • Droidspaces: ${DROID_TEXT}
-          • Integrity Spoof: ${SPOOF_TEXT}
+          • Clang: ${CLANG_TEXT}
 
           ${DETAIL_LINE}"
 
-          curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendDocument" \
-            -F chat_id="${TELEGRAM_CHAT_ID}" \
-            -F document="@${TG_ZIP}" \
-            -F caption="${CAPTION}" \
-            -F parse_mode="HTML"
+          BANNER="/tmp/banner.png"
+          curl -fsSL -o "$BANNER" "https://raw.githubusercontent.com/ShiningAsStar/extra_kernel_stuff/main/banner.png" || rm -f "$BANNER"
+
+          if [ -f "$BANNER" ]; then
+            curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendPhoto" \
+              -F chat_id="${TELEGRAM_CHAT_ID}" \
+              -F photo="@${BANNER}" \
+              -F caption="${CAPTION}" \
+              -F parse_mode="HTML"
+            curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendDocument" \
+              -F chat_id="${TELEGRAM_CHAT_ID}" \
+              -F document="@${TG_ZIP}"
+          else
+            curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendDocument" \
+              -F chat_id="${TELEGRAM_CHAT_ID}" \
+              -F document="@${TG_ZIP}" \
+              -F caption="${CAPTION}" \
+              -F parse_mode="HTML"
+          fi
 
       - name: "📱 Notify failure"
         if: failure()
@@ -605,9 +628,7 @@ jobs:
 
           SUSFS_TEXT="${{ github.event.inputs.SUSFS == 'true' && 'Enabled' || 'Disabled' }}"
           BBG_TEXT="${{ github.event.inputs.bbg == 'on' && 'Enabled' || 'Disabled' }}"
-          KPM_TEXT="${{ github.event.inputs.KPM == 'on' && 'Enabled' || 'Disabled' }}"
-          DROID_TEXT="${{ github.event.inputs.droidspaces == 'on' && 'Enabled' || 'Disabled' }}"
-          SPOOF_TEXT="${{ github.event.inputs.spoofIntegrity == 'on' && 'Enabled' || 'Disabled' }}"
+          CLANG_TEXT="${{ github.event.inputs.clangVersion == 'AOSP' && 'AOSP Clang r596125' || 'ZyCromerZ Clang 19' }}"
 
           CAPTION="❌ <b>Kernel Build Failed</b>
 
@@ -615,18 +636,26 @@ jobs:
           • Kernel: Linux ${{ env.KERNEL_VERSION }} (Android ${{ env.ANDROID_VERSION }})
           • Spoofed to: ${SPOOF_VER}${LOCAL_VERSION}
           • Devices: Redmi Note 12/13 4G
-
           ⚡ <b>KSU Variant:</b>
           • KageSU
           • SUSFS: ${SUSFS_TEXT}
           • Baseband Guard: ${BBG_TEXT}
-          • KPM: ${KPM_TEXT}
-          • Droidspaces: ${DROID_TEXT}
-          • Integrity Spoof: ${SPOOF_TEXT}
+          • Clang: ${CLANG_TEXT}
 
           🔍 <a href=\"${RUN_URL}\">View build logs</a>"
 
-          curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage" \
-            -d chat_id="${TELEGRAM_CHAT_ID}" \
-            -d text="${CAPTION}" \
-            -d parse_mode="HTML"
+          BANNER="/tmp/banner.png"
+          curl -fsSL -o "$BANNER" "https://raw.githubusercontent.com/ShiningAsStar/extra_kernel_stuff/main/banner.png" || rm -f "$BANNER"
+
+          if [ -f "$BANNER" ]; then
+            curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendPhoto" \
+              -F chat_id="${TELEGRAM_CHAT_ID}" \
+              -F photo="@${BANNER}" \
+              -F caption="${CAPTION}" \
+              -F parse_mode="HTML"
+          else
+            curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage" \
+              -d chat_id="${TELEGRAM_CHAT_ID}" \
+              -d text="${CAPTION}" \
+              -d parse_mode="HTML"
+          fi
