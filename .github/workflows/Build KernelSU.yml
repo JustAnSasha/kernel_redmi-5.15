@@ -80,6 +80,14 @@ on:
         options:
           - "thin"
           - "full"
+      clang:
+        description: "Compiler toolchain"
+        required: true
+        type: choice
+        default: "ZyCromerZ"
+        options:
+          - "ZyCromerZ"
+          - "AOSP"
       droidspaces:
         description: "Droidspaces support"
         required: true
@@ -161,11 +169,18 @@ jobs:
         run: |
           repo init -u https://android.googlesource.com/kernel/manifest -b common-android13-5.15-lts --depth=1
           repo sync -c --optimized-fetch --prune --no-clone-bundle --no-tags --force-sync --fail-fast -j$(nproc)
-          mkdir -p clang-19
-          aria2c -x16 -s16 -j16 -o clang.tar.gz \
-            "https://github.com/ZyCromerZ/Clang/releases/download/19.0.0git-20240723-release/Clang-19.0.0git-20240723.tar.gz"
-          tar -C clang-19 -zxf clang.tar.gz && rm clang.tar.gz
-          echo "CLANG_PATH=$(pwd)/clang-19" >> $GITHUB_ENV
+          if [ "${{ github.event.inputs.clang }}" = "AOSP" ]; then
+            mkdir -p prebuilts/clang/host/linux-x86/clang-r584948b
+            aria2c -x16 -s16 -j16 -o clang.tar.gz "https://github.com/topnotchfreaks/clang/releases/download/v1.0.0/clang-r584948b.tar.gz"
+            tar -C prebuilts/clang/host/linux-x86/clang-r584948b -zxf clang.tar.gz && rm clang.tar.gz
+            sed -i 's/^BRANCH=.*/BRANCH=android13-5.15/;s/^CLANG_VERSION=.*/CLANG_VERSION=r584948b/' "${{ env.kernelDir }}/${{ env.kernelName }}/build.config.constants"
+            echo "CLANG_PATH=$(pwd)/prebuilts/clang/host/linux-x86/clang-r584948b" >> $GITHUB_ENV
+          else
+            mkdir -p clang-19
+            aria2c -x16 -s16 -j16 -o clang.tar.gz "https://github.com/ZyCromerZ/Clang/releases/download/19.0.0git-20240723-release/Clang-19.0.0git-20240723.tar.gz"
+            tar -C clang-19 -zxf clang.tar.gz && rm clang.tar.gz
+            echo "CLANG_PATH=$(pwd)/clang-19" >> $GITHUB_ENV
+          fi
           KD="${{ env.kernelDir }}/${{ env.kernelName }}"
           sed -i '/^DEFCONFIG=gki_defconfig/d' $KD/build.config.gki
           sed -i '$a\DEFCONFIG=${{ env.DEFCONFIG_NAME }}' $KD/build.config.gki
@@ -402,7 +417,7 @@ jobs:
           export TG_SPOOF="${{ github.event.inputs.spoofIntegrity }}"
           export TG_DEVICE="Redmi Note 12/13 4G"
           export TG_KERNEL_VERSION="${SPOOF_VER}-android13"
-          export TG_CLANG="ZyCromerZ Clang 19"
+          export TG_CLANG="${{ github.event.inputs.clang }} Clang"
           export TG_KERNEL_BASE="Linux ${{ env.KERNEL_VERSION }}"
           export TG_ANDROID_VER="${{ env.ANDROID_VERSION }}"
           export TG_PACKAGE="${{ env.ZIP_NAME }}.zip"
