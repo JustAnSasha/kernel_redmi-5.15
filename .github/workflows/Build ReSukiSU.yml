@@ -19,7 +19,6 @@ on:
         type: choice
         default: "shining"
         options:
-          - "google"
           - "shining"
       kernelDevice:
         description: "Device (used for defconfig)"
@@ -168,11 +167,26 @@ jobs:
             sed -i '/CONFIG_LOCALVERSION/d; /CONFIG_LOCALVERSION_AUTO/d' "$CONFIG_FILE"
             echo 'CONFIG_LOCALVERSION="'"$LOCAL_VERSION"'"' >> "$CONFIG_FILE"
             echo "CONFIG_LOCALVERSION_AUTO=n" >> "$CONFIG_FILE"
-            [ -f "build.config.constants" ] && \
-              sed -i "s/^KERNEL_VERSION=.*/KERNEL_VERSION=$FULL_VERSION/" build.config.constants
-          fi
-
-      - name: "🔧 Init build tools & get Clang"
+                  [ -f "build.config.constants" ] && \
+                    sed -i "s/^KERNEL_VERSION=.*/KERNEL_VERSION=$FULL_VERSION/" build.config.constants
+                fi
+            - name: "🩹 Bypass module vermagic check (HyperOS compat)"
+              working-directory: ./${{ env.kernelDir }}/${{ env.kernelName }}
+              run: |
+                # HyperOS vendor modules are built for the stock kernel version.
+                # With a spoofed KERNELVERSION the module vermagic no longer matches,
+                # so vendor modules fail to load and the device won't boot.
+                # Bypass the vermagic check so modules load with the spoofed version.
+                if grep -q "same_magic(modmagic, vermagic" kernel/module.c; then
+                  sed -i 's/if (!same_magic(modmagic, vermagic, info->index.vers)) {/if (0 \&\& !same_magic(modmagic, vermagic, info->index.vers)) {/' kernel/module.c
+                  echo "✅ Vermagic check bypassed (same_magic)"
+                elif grep -q "strcmp(mod->magic, vermagic)" kernel/module.c; then
+                  sed -i 's/if (strcmp(mod->magic, vermagic) != 0) {/if (0 \&\& strcmp(mod->magic, vermagic) != 0) {/' kernel/module.c
+                  echo "✅ Vermagic check bypassed (strcmp)"
+                else
+                  echo "⚠️ Vermagic check pattern not found - skipping"
+                fi
+            - name: "🔧 Init build tools & get Clang"
         working-directory: ${{ env.WORK_DIR }}
         run: |
           repo init -u https://android.googlesource.com/kernel/manifest -b common-android13-5.15-lts --depth=1
@@ -240,12 +254,11 @@ jobs:
           else
             printf 'CONFIG_LTO_CLANG=y\nCONFIG_LTO_CLANG_FULL=y\n' >> "$CONFIG_FILE"
           fi
-          printf 'CONFIG_STRIP_ASM_SYMS=y\nCONFIG_LD_DEAD_CODE_DATA_ELIMINATION=y\n' >> "$CONFIG_FILE"
           cat >> "$CONFIG_FILE" << 'EOF'
           CONFIG_TCP_CONG_ADVANCED=y
           CONFIG_TCP_CONG_WESTWOOD=y
           CONFIG_TCP_CONG_BBR=y
-          CONFIG_DEFAULT_WESTWOOD=y
+          CONFIG_DEFAULT_BBR=y
           CONFIG_NET_SCH_FQ=y
           CONFIG_NET_SCH_FQ_CODEL=y
           CONFIG_ZRAM=y
@@ -259,6 +272,17 @@ jobs:
           CONFIG_PM_WAKELOCKS=y
           CONFIG_PM_WAKELOCKS_GC=y
           CONFIG_PM_WAKELOCKS_LIMIT=100
+          CONFIG_SUSPEND=y
+          CONFIG_SUSPEND_FREEZER=y
+          CONFIG_WQ_POWER_EFFICIENT_DEFAULT=y
+          # LZ4 kernel compression (matches the HyperOS-bootable build)
+          # CONFIG_KERNEL_GZIP is not set
+          # CONFIG_KERNEL_LZO is not set
+          # CONFIG_KERNEL_XZ is not set
+          # CONFIG_KERNEL_ZSTD is not set
+          # CONFIG_KERNEL_BZIP2 is not set
+          # CONFIG_KERNEL_UNCOMPRESSED is not set
+          CONFIG_KERNEL_LZ4=y
           EOF
 
       - name: "🔒 Add Baseband-guard"
@@ -345,8 +369,8 @@ jobs:
 
           if [ "${{ github.event.inputs.SUSFS }}" = "true" ]; then
             cat >> "$CONFIG_FILE" << 'EOF'
-          CONFIG_KSU_TRACEPOINT_HOOK is not set
-          CONFIG_KSU_MANUAL_HOOK is not set
+          # CONFIG_KSU_TRACEPOINT_HOOK is not set
+          # CONFIG_KSU_MANUAL_HOOK is not set
           EOF
             cat >> "$CONFIG_FILE" << 'EOF'
           CONFIG_KSU_SUSFS=y
@@ -448,7 +472,7 @@ jobs:
           export TG_SPOOF="${{ github.event.inputs.spoofIntegrity }}"
           export TG_DEVICE="Redmi Note 12/13 4G"
           export TG_KERNEL_VERSION="${SPOOF_VER}-android13"
-          export TG_CLANG="${{ github.event.inputs.clangVersion == 'AOSP' && 'AOSP Clang r596125' || 'ZyCromerZ Clang 19' }}"
+          export TG_CLANG="${{ github.event.inputs.clangVersion == 'AOSP' && 'AOSP' || 'ZyCromerZ' }}"
           export TG_KERNEL_BASE="Linux ${{ env.KERNEL_VERSION }}"
           export TG_ANDROID_VER="${{ env.ANDROID_VERSION }}"
           export TG_PACKAGE="${{ env.ZIP_NAME }}.zip"
@@ -573,7 +597,7 @@ jobs:
 
           SUSFS_TEXT="${{ github.event.inputs.SUSFS == 'true' && 'Enabled' || 'Disabled' }}"
           BBG_TEXT="${{ github.event.inputs.bbg == 'on' && 'Enabled' || 'Disabled' }}"
-          CLANG_TEXT="${{ github.event.inputs.clangVersion == 'AOSP' && 'AOSP Clang r596125' || 'ZyCromerZ Clang 19' }}"
+          CLANG_TEXT="${{ github.event.inputs.clangVersion == 'AOSP' && 'AOSP' || 'ZyCromerZ' }}"
 
           if [ -n "$TELEGRAPH_URL" ]; then
             DETAIL_LINE="🧾 <a href=\"${TELEGRAPH_URL}\">Detailed Build Info</a>"
@@ -630,7 +654,7 @@ jobs:
 
           SUSFS_TEXT="${{ github.event.inputs.SUSFS == 'true' && 'Enabled' || 'Disabled' }}"
           BBG_TEXT="${{ github.event.inputs.bbg == 'on' && 'Enabled' || 'Disabled' }}"
-          CLANG_TEXT="${{ github.event.inputs.clangVersion == 'AOSP' && 'AOSP Clang r596125' || 'ZyCromerZ Clang 19' }}"
+          CLANG_TEXT="${{ github.event.inputs.clangVersion == 'AOSP' && 'AOSP' || 'ZyCromerZ' }}"
 
           CAPTION="❌ <b>Kernel Build Failed</b>
 
