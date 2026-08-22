@@ -19,7 +19,6 @@ on:
         type: choice
         default: "shining"
         options:
-          - "google"
           - "shining"
       kernelDevice:
         description: "Device (used for defconfig)"
@@ -341,7 +340,7 @@ jobs:
           export TG_SPOOF="${{ github.event.inputs.spoofIntegrity }}"
           export TG_DEVICE="Redmi Note 12/13 4G"
           export TG_KERNEL_VERSION="${SPOOF_VER}-android13"
-          export TG_CLANG="${{ github.event.inputs.clangVersion == 'AOSP' && 'AOSP Clang r596125' || 'ZyCromerZ Clang 19' }}"
+          export TG_CLANG="${{ github.event.inputs.clangVersion == 'AOSP' && 'AOSP' || 'ZyCromerZ' }}"
           export TG_KERNEL_BASE="Linux ${{ env.KERNEL_VERSION }}"
           export TG_ANDROID_VER="${{ env.ANDROID_VERSION }}"
           export TG_PACKAGE="${{ env.ZIP_NAME }}.zip"
@@ -458,7 +457,7 @@ jobs:
           )"
 
           BBG_TEXT="${{ github.event.inputs.bbg == 'on' && 'Enabled' || 'Disabled' }}"
-          CLANG_TEXT="${{ github.event.inputs.clangVersion == 'AOSP' && 'AOSP Clang r596125' || 'ZyCromerZ Clang 19' }}"
+          CLANG_TEXT="${{ github.event.inputs.clangVersion == 'AOSP' && 'AOSP' || 'ZyCromerZ' }}"
 
           if [ -n "$TELEGRAPH_URL" ]; then
             DETAIL_LINE="🧾 <a href=\"${TELEGRAPH_URL}\">Detailed Build Info</a>"
@@ -471,6 +470,7 @@ jobs:
           • Kernel: Linux ${{ env.KERNEL_VERSION }} (Android ${{ env.ANDROID_VERSION }})
           • Spoofed to: ${SPOOF_VER}${LOCAL_VERSION}
           • Devices: Redmi Note 12/13 4G
+
           ⚙️ <b>Configuration:</b>
           • LTO: ${{ github.event.inputs.LtoOptimizations }}
           • Optimization: -${{ github.event.inputs.optimizationLevel }}
@@ -515,7 +515,7 @@ jobs:
           LOCAL_VERSION="${{ github.event.inputs.localVersion }}"
 
           BBG_TEXT="${{ github.event.inputs.bbg == 'on' && 'Enabled' || 'Disabled' }}"
-          CLANG_TEXT="${{ github.event.inputs.clangVersion == 'AOSP' && 'AOSP Clang r596125' || 'ZyCromerZ Clang 19' }}"
+          CLANG_TEXT="${{ github.event.inputs.clangVersion == 'AOSP' && 'AOSP' || 'ZyCromerZ' }}"
 
           CAPTION="❌ <b>Kernel Build Failed</b>
 
@@ -523,6 +523,7 @@ jobs:
           • Kernel: Linux ${{ env.KERNEL_VERSION }} (Android ${{ env.ANDROID_VERSION }})
           • Spoofed to: ${SPOOF_VER}${LOCAL_VERSION}
           • Devices: Redmi Note 12/13 4G
+
           ⚙️ <b>Configuration:</b>
           • LTO: ${{ github.event.inputs.LtoOptimizations }}
           • Optimization: -${{ github.event.inputs.optimizationLevel }}
