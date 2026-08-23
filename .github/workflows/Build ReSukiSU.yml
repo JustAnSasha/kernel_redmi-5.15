@@ -388,6 +388,7 @@ jobs:
           git clone --depth=1 https://github.com/ShiningAsStar/AnyKernel3 -b master AK3_Workspace
           rm -rf AK3_Workspace/.git
           cp out/dist/Image AK3_Workspace/Image.ReSukiSU
+          [ -f out/dist/system_dlkm.img ] && cp out/dist/system_dlkm.img AK3_Workspace/system_dlkm.img
           ZIP_NAME="ReSukiSU_AK3_${{ github.event.inputs.kernelBranch }}_${BUILD_TIME}"
           echo "ZIP_NAME=${ZIP_NAME}" >> $GITHUB_ENV
           echo "AK3_DIR=$(pwd)/AK3_Workspace" >> $GITHUB_ENV
