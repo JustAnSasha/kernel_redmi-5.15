@@ -289,22 +289,9 @@ jobs:
           set -e
           rm -rf KernelSU drivers/kernelsu
           curl -LSs "https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/main/kernel/setup.sh" | bash -s main
-          grep -q 'obj-$(CONFIG_KSU) += kernelsu/' drivers/Makefile
-          grep -q 'source "drivers/kernelsu/Kconfig"' drivers/Kconfig
           cd KernelSU
-          KSU_VERSION_COUNT=$(git rev-list --count HEAD)
-          export KSUVER=$(expr 30000 + $KSU_VERSION_COUNT + 700)
-          echo "KSUVER=$KSUVER" >> $GITHUB_ENV
-          KSU_API_VERSION=$KSUVER
-          KSU_COMMIT_HASH=$(git rev-parse --short=8 HEAD)
-          KBUILD_FILE="kernel/Makefile"
-          [ -f "kernel/Kbuild" ] && KBUILD_FILE="kernel/Kbuild"
-          sed -i 's/-DKSU_VERSION_FULL=[^ ]*//g' "$KBUILD_FILE"
-          sed -i '/KSU_VERSION_FULL/d' "$KBUILD_FILE"
-          cat >> "$KBUILD_FILE" <<EOF
-          ccflags-y += -DKSU_VERSION_FULL=\"v${KSU_API_VERSION}-${KSU_COMMIT_HASH}@JustAnSasha\"
-          EOF
-          echo "✅ ReSuKiSU $KSUVER (v${KSU_API_VERSION}-${KSU_COMMIT_HASH}@JustAnSasha)"
+          sed -i '/ccflags-y.*KSU_VERSION_FULL/d' kernel/Kbuild kernel/Makefile 2>/dev/null || true
+          echo 'ccflags-y += -DKSU_VERSION_FULL="@ReSukiSU${{ inputs.localVersion }}"' >> kernel/Kbuild
 
       - name: "🧩 Setup SUSFS"
         if: github.event.inputs.SUSFS == 'true'
