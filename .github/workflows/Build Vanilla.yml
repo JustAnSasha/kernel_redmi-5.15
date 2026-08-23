@@ -279,8 +279,6 @@ jobs:
               build/build.sh -j$(nproc --all)
           else
             export PATH=$CLANG_PATH/bin:$PATH
-            export KBUILD_BUILD_USER=ShiningAsStar
-            export KBUILD_BUILD_HOST=GitHub
             BUILD_ARGS="CC=clang CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE=aarch64-linux-gnu-"
             LTO=${{ github.event.inputs.LtoOptimizations }} \
               BUILD_CONFIG=${{ env.kernelDir }}/${{ env.kernelName }}/build.config.gki.aarch64 \
