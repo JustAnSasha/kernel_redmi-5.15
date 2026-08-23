@@ -331,8 +331,8 @@ jobs:
 
           if [ "${{ github.event.inputs.SUSFS }}" = "true" ]; then
             cat >> "$CONFIG_FILE" << 'EOF'
-          CONFIG_KSU_TRACEPOINT_HOOK is not set
-          CONFIG_KSU_MANUAL_HOOK is not set
+          # CONFIG_KSU_TRACEPOINT_HOOK is not set
+          # CONFIG_KSU_MANUAL_HOOK is not set
           EOF
             cat >> "$CONFIG_FILE" << 'EOF'
           CONFIG_KSU_SUSFS=y
