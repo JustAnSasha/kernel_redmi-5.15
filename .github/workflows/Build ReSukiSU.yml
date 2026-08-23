@@ -240,6 +240,7 @@ jobs:
             printf 'CONFIG_LTO_CLANG=y\nCONFIG_LTO_CLANG_FULL=y\n' >> "$CONFIG_FILE"
           fi
           printf 'CONFIG_STRIP_ASM_SYMS=y\nCONFIG_LD_DEAD_CODE_DATA_ELIMINATION=y\n' >> "$CONFIG_FILE"
+          sed -i '/^CONFIG_TCP_CONG_ADVANCED/d;/^CONFIG_TCP_CONG_WESTWOOD/d;/^CONFIG_TCP_CONG_BBR/d;/^CONFIG_DEFAULT_WESTWOOD/d;/^CONFIG_NET_SCH_FQ\b/d;/^CONFIG_NET_SCH_FQ_CODEL/d;/^CONFIG_ZRAM\b/d;/^CONFIG_ZSMALLOC/d;/^CONFIG_CRYPTO_LZ4\b/d;/^CONFIG_CRYPTO_LZ4HC/d;/^CONFIG_CRYPTO_ZSTD/d;/^CONFIG_ZRAM_DEF_COMP_LZ4/d;/^CONFIG_TMPFS_XATTR/d;/^CONFIG_TMPFS_POSIX_ACL/d;/^CONFIG_PM_WAKELOCKS\b/d;/^CONFIG_PM_WAKELOCKS_GC/d;/^CONFIG_PM_WAKELOCKS_LIMIT/d' "$CONFIG_FILE"
           cat >> "$CONFIG_FILE" << 'EOF'
           CONFIG_TCP_CONG_ADVANCED=y
           CONFIG_TCP_CONG_WESTWOOD=y
@@ -291,7 +292,7 @@ jobs:
           curl -LSs "https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/main/kernel/setup.sh" | bash -s main
           cd KernelSU
           sed -i '/ccflags-y.*KSU_VERSION_FULL/d' kernel/Kbuild kernel/Makefile 2>/dev/null || true
-          echo 'ccflags-y += -DKSU_VERSION_FULL="@ReSukiSU${{ inputs.localVersion }}"' >> kernel/Kbuild
+          echo 'ccflags-y += -DKSU_VERSION_FULL=\"@ReSukiSU${{ github.event.inputs.localVersion }}\"' >> kernel/Kbuild
 
       - name: "🧩 Setup SUSFS"
         if: github.event.inputs.SUSFS == 'true'
@@ -359,10 +360,11 @@ jobs:
           if [ "${{ github.event.inputs.clangVersion }}" = "AOSP" ]; then
             LTO=${{ github.event.inputs.LtoOptimizations }} \
               BUILD_CONFIG=${{ env.kernelDir }}/${{ env.kernelName }}/build.config.gki.aarch64 \
+              LLVM=1 LLVM_IAS=1 \
               build/build.sh -j$(nproc --all)
           else
             export PATH=$CLANG_PATH/bin:$PATH
-            BUILD_ARGS="CC=clang CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE=aarch64-linux-gnu-"
+            BUILD_ARGS="LLVM=1 LLVM_IAS=1 CC=clang CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE=aarch64-linux-gnu-"
             LTO=${{ github.event.inputs.LtoOptimizations }} \
               BUILD_CONFIG=${{ env.kernelDir }}/${{ env.kernelName }}/build.config.gki.aarch64 \
               build/build.sh -j$(nproc --all) $BUILD_ARGS
