@@ -165,10 +165,11 @@ configure_defconfig() {
     log "zram/zsmalloc as modules for system_dlkm EROFS"
     sed -i '/^CONFIG_ZRAM=/d; /^CONFIG_ZSMALLOC=/d; /^CONFIG_ZRAM_DEF_COMP/d; /^CONFIG_MODULE_COMPRESS/d' "$cfg"
     cat >> "$cfg" << 'EOF'
-    CONFIG_MODULE_UNLOAD=y
-    CONFIG_MODULE_COMPRESS_GZIP=y
-    CONFIG_ZRAM=m
-    CONFIG_ZRAM_WRITEBACK=y
+CONFIG_MODULE_UNLOAD=y
+CONFIG_MODULE_COMPRESS_GZIP=y
+CONFIG_ZSMALLOC=m
+CONFIG_ZRAM=m
+CONFIG_ZRAM_WRITEBACK=y
 EOF
   fi
 }
@@ -340,18 +341,38 @@ pack_erofs() {
     return 0
   fi
 
-  log "No prebuilt system_dlkm.img found, collecting modules manually"
+  log "No prebuilt system_dlkm.img found, collecting zram/zsmalloc modules"
   local mod_root
   mod_root=$(find "$WORK_DIR/out" -maxdepth 5 -type d -path "*staging/lib/modules" 2>/dev/null | head -n1)
   if [ -z "$mod_root" ]; then
     echo "::warning::no modules staging dir found, skipping EROFS pack"
     return 0
   fi
-  mkdir -p "$staging/lib/modules"
-  find "$mod_root" \( -name "*.ko" -o -name "*.ko.gz" \) -exec cp -f {} "$staging/lib/modules/" \;
 
-  for req in zram zsmalloc lz4 lz4hc zstd zcomp; do
-    ls "$staging/lib/modules/" | grep -q "^${req}" && echo "packed ${req}.ko" || echo "::warning::${req}.ko not found in build output"
+  local ko rel dest deps dep dep_ko
+  for ko in $(find "$mod_root" \( -name "zram.ko" -o -name "zsmalloc.ko" \) 2>/dev/null); do
+    rel="${ko#$mod_root/}"
+    dest="$staging/lib/modules/$rel"
+    mkdir -p "$(dirname "$dest")"
+    cp -f "$ko" "$dest"
+    echo "packed: lib/modules/$rel"
+  done
+
+  [ -f "$staging/lib/modules/kernel/drivers/block/zram/zram.ko" ] || echo "::warning::zram.ko missing from build output"
+  [ -f "$staging/lib/modules/kernel/mm/zsmalloc.ko" ] || echo "::warning::zsmalloc.ko missing from build output"
+
+  deps=$(modinfo -F depends "$staging/lib/modules/kernel/drivers/block/zram/zram.ko" 2>/dev/null || true)
+  for dep in ${deps//,/ }; do
+    dep_ko=$(find "$mod_root" -name "${dep}.ko" | head -n1)
+    if [ -n "$dep_ko" ]; then
+      rel="${dep_ko#$mod_root/}"
+      dest="$staging/lib/modules/$rel"
+      mkdir -p "$(dirname "$dest")"
+      cp -f "$dep_ko" "$dest"
+      echo "packed dependency: lib/modules/$rel"
+    else
+      echo "::warning::dependency ${dep}.ko not found"
+    fi
   done
 
   mkfs.erofs -z lz4hc,9 -T 1230768000 system_dlkm.img "$staging" 2>/dev/null || \
@@ -378,7 +399,7 @@ package_ak3() {
   build_time=$(date +'%Y-%m-%d')
   zip_name="${VARIANT}_AK3_${KERNEL_BRANCH}_${build_time}"
   echo "ZIP_NAME=$zip_name" >> "$GITHUB_ENV"
-  echo "AK3_DIR=$DIST_DIR/AK3_Workspace" >> "$GITHUB_ENV"
+  echo "AK3_DIR=$WORK_DIR/AK3_Workspace" >> "$GITHUB_ENV"
   echo "ZIP_PATH=$WORK_DIR/AK3_Workspace" >> "$GITHUB_ENV"
   echo "Done: $zip_name"
 }
