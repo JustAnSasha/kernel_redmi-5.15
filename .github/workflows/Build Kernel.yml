@@ -1,124 +1,114 @@
-﻿name: "Build Kernel"
+name: Build Kernel
 
 on:
   workflow_dispatch:
     inputs:
       variant:
-        description: "KSU variant"
+        description: KSU variant
         required: true
         type: choice
-        default: "SukiSU-Ultra"
+        default: SukiSU-Ultra
         options:
-          - "Vanilla"
-          - "KernelSU"
-          - "KernelSU-Next"
-          - "ReSukiSU"
-          - "SukiSU-Ultra"
+          - Vanilla
+          - KernelSU
+          - KernelSU-Next
+          - ReSukiSU
+          - SukiSU-Ultra
       kernelSourceURL:
-        description: "Kernel source URL"
+        description: Kernel source URL
         required: true
         type: string
-        default: "https://github.com/ShiningAsStar/kernel_redmi-5.15"
+        default: https://github.com/ShiningAsStar/kernel_redmi-5.15
       kernelBranch:
-        description: "Kernel branch"
+        description: Kernel branch
         required: true
         type: choice
-        default: "shining"
+        default: shining
         options:
-          - "shining"
+          - shining
       kernelDevice:
-        description: "Device (used for defconfig)"
+        description: Device defconfig
         required: true
         type: string
-        default: "gki"
+        default: gki
       kernelSpoofVersion:
-        description: "Spoof kernel version (X.Y.Z)"
+        description: Spoofed kernel version (leave empty for stock)
         required: false
         type: string
-        default: "6.1.100"
+        default: ""
       localVersion:
-        description: "Custom localversion"
+        description: Local version suffix (leave empty for stock)
         required: false
         type: string
-        default: "-Shiney"
+        default: ""
       SUSFS:
-        description: "Enable SuSFS"
+        description: Enable SuSFS
         required: true
         type: boolean
         default: true
       optimizationLevel:
-        description: "Compiler optimization level"
+        description: Optimization level
         required: false
         type: choice
-        default: "O3"
+        default: O3
         options:
-          - "O2"
-          - "O3"
-          - "Os"
+          - O2
+          - O3
+          - Os
       clangVersion:
-        description: "Clang toolchain"
+        description: Clang toolchain
         required: true
         type: choice
-        default: "ZyCromerZ"
+        default: ZyCromerZ
         options:
-          - "ZyCromerZ"
-          - "AOSP"
+          - ZyCromerZ
+          - AOSP
       tickRate:
-        description: "Kernel tick rate (Hz)"
+        description: Kernel tick rate
         required: false
         type: choice
         default: "250"
         options:
-          - "default"
+          - default
           - "100"
           - "250"
           - "300"
           - "500"
-          - "600"
-          - "750"
           - "1000"
       bbg:
-        description: "Baseband-guard"
+        description: Baseband guard
         required: true
         type: choice
-        default: "on"
+        default: on
         options:
-          - "on"
-          - "off"
+          - on
+          - off
       LtoOptimizations:
-        description: "LTO type"
+        description: LTO type
         required: true
         type: choice
-        default: "thin"
+        default: thin
         options:
-          - "thin"
-          - "full"
+          - thin
+          - full
       KPM:
-        description: "Kernel Patch Module (SukiSU-Ultra / ReSukiSU only)"
+        description: Kernel Patch Module
         required: true
         type: choice
-        default: "off"
+        default: off
         options:
-          - "on"
-          - "off"
+          - on
+          - off
       droidspaces:
-        description: "Droidspaces support"
+        description: Droidspaces support
         required: true
         type: choice
-        default: "off"
+        default: off
         options:
-          - "on"
-          - "off"
-      spoofIntegrity:
-        description: "Spoof device state"
-        required: true
-        type: choice
-        default: "on"
-        options:
-          - "on"
-          - "off"
+          - on
+          - off
       systemDlkmErofs:
-        description: "Pack system_dlkm as EROFS with zram/zsmalloc modules"
+        description: Pack system_dlkm as EROFS
         required: true
         type: boolean
         default: false
@@ -126,15 +116,27 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: kernel-build
+  cancel-in-progress: true
+
 jobs:
-  Build-Kernel:
-    name: "Build ${{ inputs.variant }} kernel"
+  build:
+    name: Build ${{ inputs.variant }}
     runs-on: ubuntu-latest
     steps:
-      - name: "Checkout"
+      - name: Checkout
         uses: actions/checkout@v4
 
-      - name: "Build"
+      - name: Restore ccache
+        uses: actions/cache@v4
+        with:
+          path: .ccache
+          key: ccache-${{ inputs.variant }}-${{ github.run_id }}
+          restore-keys: |
+            ccache-${{ inputs.variant }}-
+
+      - name: Build
         env:
           VARIANT: ${{ inputs.variant }}
           KERNEL_SOURCE_URL: ${{ inputs.kernelSourceURL }}
@@ -150,11 +152,10 @@ jobs:
           LTO_TYPE: ${{ inputs.LtoOptimizations }}
           KPM: ${{ inputs.KPM }}
           DROIDSPACES: ${{ inputs.droidspaces }}
-          SPOOF_INTEGRITY: ${{ inputs.spoofIntegrity }}
           SYSTEM_DLKM_EROFS: ${{ inputs.systemDlkmErofs }}
         run: bash configuration/build.sh
 
-      - name: "Upload artifact"
+      - name: Upload artifact
         if: success()
         uses: actions/upload-artifact@v4
         with:
@@ -162,7 +163,7 @@ jobs:
           path: ${{ env.AK3_DIR }}
           retention-days: 3
 
-      - name: "Telegram notify"
+      - name: Telegram notify
         if: always()
         shell: bash
         env:
@@ -179,7 +180,6 @@ jobs:
           ENABLE_SUSFS: ${{ inputs.SUSFS }}
           BBG: ${{ inputs.bbg }}
           KPM: ${{ inputs.KPM }}
-          SPOOF_INTEGRITY: ${{ inputs.spoofIntegrity }}
           KSUVER: ${{ env.KSUVER }}
           ZIP_PATH: ${{ env.ZIP_PATH }}
         run: python3 configuration/notify.py

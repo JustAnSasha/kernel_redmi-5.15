@@ -1,11 +1,8 @@
 #!/usr/bin/env bash
-set -e
+set -euo pipefail
 
 CFG="$(cd "$(dirname "$0")" && pwd)/build-config.json"
 WORK_DIR="$(pwd)"
-KERNEL_VERSION="5.15"
-ANDROID_VERSION="13"
-ANDROID_BRANCH="common-android13-5.15-lts"
 
 VARIANT="${VARIANT:-SukiSU-Ultra}"
 KERNEL_DEVICE="${KERNEL_DEVICE:-gki}"
@@ -16,25 +13,28 @@ LTO_TYPE="${LTO_TYPE:-thin}"
 BBG="${BBG:-on}"
 KPM="${KPM:-off}"
 DROIDSPACES="${DROIDSPACES:-off}"
-SPOOF_INTEGRITY="${SPOOF_INTEGRITY:-on}"
 ENABLE_SUSFS="${ENABLE_SUSFS:-true}"
 SYSTEM_DLKM_EROFS="${SYSTEM_DLKM_EROFS:-false}"
+
+KERNEL_BRANCH="${KERNEL_BRANCH:-$(jq -r '.repo.kernelBranch' "$CFG")}"
+KERNEL_SOURCE_URL="${KERNEL_SOURCE_URL:-$(jq -r '.repo.kernelSourceURL' "$CFG")}"
+KERNEL_SPOOF_VERSION="${KERNEL_SPOOF_VERSION:-}"
+LOCAL_VERSION="${LOCAL_VERSION:-}"
 
 kernelDir="common_${KERNEL_DEVICE}"
 kernelName="common"
 DEFCONFIG_NAME="${KERNEL_DEVICE}_defconfig"
 SRC="$WORK_DIR/$kernelDir/$kernelName"
+DIST_DIR="$WORK_DIR/out/dist"
 
 log() { echo -e "\033[1;36m==> $1\033[0m"; }
 die() { echo "::error::$1"; exit 1; }
-
-json_get() { jq -r "$1" "$CFG"; }
-
+json() { jq -r "$1" "$CFG"; }
 is_on() { [[ "$1" == "on" || "$1" == "true" ]]; }
 
 apply_patch() {
   local url="$1" file
-  file=$(basename "$url")
+  file="$(basename "$url")"
   curl -L -s -f -o "$file" "$url" || return 1
   if patch -p1 --forward --dry-run < "$file" >/dev/null 2>&1; then
     patch -p1 --forward < "$file"
@@ -46,12 +46,12 @@ prepare_env() {
   log "Preparing environment"
   mkdir -p "$kernelDir"
   sudo apt-get update -qq
-  sudo apt-get install -y repo rsync aria2 jq erofs-utils zip
+  sudo apt-get install -y repo rsync aria2 jq erofs-utils zip ccache
 }
 
 free_space() {
   log "Freeing disk space"
-  sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc "/usr/local/share/boost" "$AGENT_TOOLSDIRECTORY"
+  sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/share/boost "${AGENT_TOOLSDIRECTORY:-}"
   sudo docker image prune --all --force 2>/dev/null || true
   sudo docker builder prune -a -f 2>/dev/null || true
 }
@@ -70,9 +70,7 @@ add_swap() {
 
 clone_kernel() {
   log "Cloning kernel source"
-  git clone --recursive --branch "$KERNEL_BRANCH" \
-    "${KERNEL_SOURCE_URL:-$(json_get '.repo.kernelSourceURL')}" \
-    "$SRC" --depth=1
+  git clone --recursive --branch "$KERNEL_BRANCH" "$KERNEL_SOURCE_URL" "$SRC" --depth=1
 }
 
 spoof_version() {
@@ -89,38 +87,42 @@ spoof_version() {
   [ -f build.config.constants ] && \
     sed -i "s/^KERNEL_VERSION=.*/KERNEL_VERSION=${KERNEL_SPOOF_VERSION}${LOCAL_VERSION}/" build.config.constants
 }
-
 setup_toolchain() {
   log "Syncing build tools"
   cd "$WORK_DIR"
-  repo init -u https://android.googlesource.com/kernel/manifest -b $ANDROID_BRANCH --depth=1
-  repo sync -c --optimized-fetch --prune --no-clone-bundle --no-tags --force-sync --fail-fast -j$(nproc)
+  repo init -u https://android.googlesource.com/kernel/manifest -b "$(json '.device.androidBranch')" --depth=1
+  repo sync -c --optimized-fetch --prune --no-clone-bundle --no-tags --force-sync --fail-fast -j"$(nproc)"
 
   local kd="$SRC"
   if [ "$CLANG_VERSION" = "AOSP" ]; then
-    log "Fetching AOSP clang r596125"
+    log "Fetching latest AOSP clang"
     rm -rf .repo common
-    aria2c -x16 -s16 -j16 -o clang-r596125.tar.gz "$(json_get '.toolchain.aosp.url')"
-    mkdir -p prebuilts/clang/host/linux-x86/clang-r596125
-    tar -xzf clang-r596125.tar.gz -C prebuilts/clang/host/linux-x86/clang-r596125
-    rm -f clang-r596125.tar.gz
+    local clang_ver
+    clang_ver="$(curl -s "https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+/refs/heads/main/?format=JSON" | sed '1d' | jq -r '.entries[].name' | grep -E '^clang-r[0-9]+' | sort -V | tail -n1 || true)"
+    [ -z "$clang_ver" ] && clang_ver="$(json '.toolchain.aosp.version')"
+    echo "Using: $clang_ver"
+    local clang_dir="prebuilts/clang/host/linux-x86/$clang_ver"
+    mkdir -p "$clang_dir"
+    aria2c -x16 -s16 -j16 -o clang.tar.gz "https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/main/${clang_ver}.tar.gz"
+    tar -xzf clang.tar.gz -C "$clang_dir" --strip-components=1 2>/dev/null || tar -xzf clang.tar.gz -C "$clang_dir"
+    rm -f clang.tar.gz
     rm -rf prebuilts/clang/host/linux-x86/clang-3289846 \
            prebuilts/clang/host/linux-x86/clang-r450784e \
            prebuilts/clang/host/linux-x86/clang-r547379 \
            prebuilts/clang/host/linux-x86/clang-stable
     sed -i -e 's/^BRANCH=.*/BRANCH=android13-5.15/' \
-      -e 's/^CLANG_VERSION=.*/CLANG_VERSION=r596125/' \
+      -e "s/^CLANG_VERSION=.*/CLANG_VERSION=$clang_ver/" \
       "$kd/build.config.constants"
   else
     log "Fetching latest ZyCromerZ clang"
     local url
-    url=$(curl -sL "$(json_get '.toolchain.zycromerz.releaseApi')" | jq -r '.assets[] | select(.name | endswith(".tar.gz")) | .browser_download_url' | head -n1)
-    [ -z "$url" ] && url=$(json_get '.toolchain.zycromerz.fallbackUrl')
+    url="$(curl -sL "$(json '.toolchain.zycromerz.releaseApi')" | jq -r '.assets[] | select(.name | endswith(".tar.gz")) | .browser_download_url' | head -n1 || true)"
+    [ -z "$url" ] && url="$(json '.toolchain.zycromerz.fallbackUrl')"
     echo "Using: $url"
-    mkdir -p clang-19
+    mkdir -p clang
     aria2c -x16 -s16 -j16 -o clang.tar.gz "$url"
-    tar -C clang-19 -zxf clang.tar.gz && rm clang.tar.gz
-    export CLANG_PATH="$WORK_DIR/clang-19"
+    tar -C clang -zxf clang.tar.gz && rm clang.tar.gz
+    export CLANG_PATH="$WORK_DIR/clang"
   fi
 
   sed -i '/^DEFCONFIG=gki_defconfig/d' "$kd/build.config.gki"
@@ -132,13 +134,11 @@ setup_toolchain() {
     -e '/^MODULES_ORDER=/d' -e '/^MODULES_LIST=/d' \
     "$kd/build.config.gki.aarch64"
 }
+
 configure_defconfig() {
   log "Configuring defconfig"
   cd "$SRC"
   local cfg="arch/arm64/configs/$DEFCONFIG_NAME"
-
-  apply_patch "$(json_get '.repo.extraStuff')/patches/custom-tickrate-options.patch"
-  find . -name "*.rej" -delete
 
   sed -i '/CONFIG_CC_OPTIMIZE_FOR_PERFORMANCE\b/d; /CONFIG_CC_OPTIMIZE_FOR_PERFORMANCE_O3/d; /CONFIG_CC_OPTIMIZE_FOR_SIZE/d' "$cfg"
   case "$OPT_LEVEL" in
@@ -159,7 +159,7 @@ configure_defconfig() {
     printf 'CONFIG_LTO_CLANG=y\nCONFIG_LTO_CLANG_FULL=y\n' >> "$cfg"
   fi
 
-  json_get '.defconfigExtras[]' >> "$cfg"
+  json '.defconfigExtras[]' >> "$cfg"
 
   if [ "$SYSTEM_DLKM_EROFS" = "true" ]; then
     log "zram/zsmalloc as modules for system_dlkm EROFS"
@@ -173,24 +173,17 @@ CONFIG_ZRAM_WRITEBACK=y
 EOF
   fi
 }
-
 patch_extras() {
   cd "$SRC"
   if is_on "$BBG"; then
     log "Baseband-guard"
-    wget -qO- "$(json_get '.patches.basebandGuard')" | bash
+    wget -qO- "$(json '.patches.basebandGuard')" | bash
     echo "CONFIG_BBG=y" >> "arch/arm64/configs/$DEFCONFIG_NAME"
-    sed -i '/^config LSM$/,/^help$/{ /^[[:space:]]*default/ { /baseband_guard/! s/selinux/selinux,baseband_guard/ } }' security/Kconfig
+    sed -i '/^config LSM$/,/^help$/{ /^[[:space:]]*default/ { /baseband_guard/! s/selinux/selinux,baseband_guard/ }' security/Kconfig
   fi
   if is_on "$DROIDSPACES"; then
     log "Droidspaces"
-    curl -sL "$(json_get '.patches.droidspaces')" | git apply -v --ignore-whitespace
-  fi
-  if is_on "$SPOOF_INTEGRITY"; then
-    log "Integrity spoof"
-    curl -Lso spoof-integrity.patch "$(json_get '.repo.extraStuff')/patches/spoof-kernel-integrity.patch"
-    patch -p1 --forward < spoof-integrity.patch || true
-    rm -f spoof-integrity.patch
+    curl -sL "$(json '.patches.droidspaces')" | git apply -v --ignore-whitespace
   fi
 }
 
@@ -200,27 +193,16 @@ setup_ksu() {
   cd "$SRC"
   rm -rf KernelSU KernelSU-Next drivers/kernelsu
 
-  local setup_url setup_arg dir offset
-  setup_url=$(json_get ".variants.\"$VARIANT\".ksu.setupUrl")
-  setup_arg=$(json_get ".variants.\"$VARIANT\".ksu.setupArg")
-  dir=$(json_get ".variants.\"$VARIANT\".ksu.dir")
-  offset=$(json_get ".variants.\"$VARIANT\".ksu.versionOffset // 0")
+  local setup_url setup_arg dir
+  setup_url="$(json ".variants.\"$VARIANT\".ksu.setupUrl")"
+  setup_arg="$(json ".variants.\"$VARIANT\".ksu.setupArg")"
+  dir="$(json ".variants.\"$VARIANT\".ksu.dir")"
 
   curl -LSs "$setup_url" | bash -s "$setup_arg"
 
   local ksu_dir="$SRC/$dir"
-  KSUVER=$(( $(git -C "$ksu_dir" rev-list --count HEAD) + offset ))
-  echo "KSUVER=$KSUVER" >> "$GITHUB_ENV"
-
-  local api_ver commit kbuild
-  api_ver=$(grep -E "^KSU_VERSION[[:space:]]*=" "$ksu_dir/Makefile" | cut -d'=' -f2 | tr -d '[:space:]')
-  [ -z "$api_ver" ] && api_ver=$(json_get ".variants.\"$VARIANT\".ksu.apiFallback")
-  commit=$(git -C "$ksu_dir" rev-parse --short=8 HEAD)
-  kbuild="$ksu_dir/kernel/Makefile"
-  [ -f "$ksu_dir/kernel/Kbuild" ] && kbuild="$ksu_dir/kernel/Kbuild"
-  sed -i 's/-DKSU_VERSION_FULL=[^ ]*//g' "$kbuild"
-  sed -i '/KSU_VERSION_FULL/d' "$kbuild"
-  echo "ccflags-y += -DKSU_VERSION_FULL=\"v${api_ver}-${commit}@shiney\"" >> "$kbuild"
+  KSUVER="$(git -C "$ksu_dir" describe --tags --abbrev=0 2>/dev/null || git -C "$ksu_dir" rev-parse --short=8 HEAD)"
+  echo "KSUVER=$KSUVER" >> "${GITHUB_ENV:-/dev/null}"
 }
 
 setup_susfs() {
@@ -228,14 +210,14 @@ setup_susfs() {
   [ "$VARIANT" = "Vanilla" ] && return 0
   log "Setting up SuSFS"
   cd "$SRC"
-  git clone --depth=1 "$(json_get '.patches.susfsRepo')" -b "$(json_get '.patches.susfsBranch')" susfs
+  git clone --depth=1 "$(json '.patches.susfsRepo')" -b "$(json '.patches.susfsBranch')" susfs
 
   mkdir -p include/linux fs
   cp -f susfs/kernel_patches/include/linux/susfs.h include/linux/
   cp -f susfs/kernel_patches/include/linux/susfs_def.h include/linux/
   cp -f susfs/kernel_patches/fs/susfs.c fs/
 
-  curl -Lso susfs_kernel.patch "$(json_get '.repo.extraStuff')/patches/50_add_susfs_in_gki-android13-5.15.patch"
+  curl -Lso susfs_kernel.patch "$(json '.patches.susfsKernel')"
   patch -p1 --forward < susfs_kernel.patch || true
   rm -f susfs_kernel.patch
 
@@ -249,15 +231,7 @@ setup_susfs() {
       cd ..
       ;;
     KernelSU-Next)
-      git clone --depth=1 "$(json_get '.patches.wildSusfsFix')" wild_susfs_fix
       patch -p2 --forward --fuzz=3 -d drivers/kernelsu < susfs/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch || true
-      local fix_dir="wild_susfs_fix/$(json_get ".variants.\"$VARIANT\".ksu.wildFixDir")"
-      for p in $(json_get ".variants.\"$VARIANT\".ksu.wildFixPatches[]"); do
-        if [ -f "$fix_dir/$p" ]; then
-          patch -p2 --forward -d drivers/kernelsu < "$fix_dir/$p" && echo "applied $p" || echo "skipped $p"
-        fi
-      done
-      rm -rf wild_susfs_fix
       ;;
   esac
   rm -rf susfs
@@ -269,35 +243,37 @@ configure_ksu_defconfig() {
 
   [ "$VARIANT" = "Vanilla" ] && return 0
 
-  json_get '.ksuBaseConfig[]' >> "$cfg"
+  json '.ksuBaseConfig[]' >> "$cfg"
 
   if is_on "$ENABLE_SUSFS"; then
     if [ "$VARIANT" = "ReSukiSU" ]; then
       printf '# CONFIG_KSU_TRACEPOINT_HOOK is not set\n# CONFIG_KSU_MANUAL_HOOK is not set\n' >> "$cfg"
     fi
-    json_get '.susfsConfig[]' >> "$cfg"
+    json '.susfsConfig[]' >> "$cfg"
   fi
 }
 
 compile() {
   log "Compiling kernel"
   cd "$WORK_DIR"
+  export CCACHE=1
+  export CCACHE_DIR="$WORK_DIR/.ccache"
   local extra=""
   [ "$VARIANT" = "ReSukiSU" ] && extra="LLVM=1 LLVM_IAS=1"
   if [ "$CLANG_VERSION" = "AOSP" ]; then
     LTO="$LTO_TYPE" \
       BUILD_CONFIG="$kernelDir/$kernelName/build.config.gki.aarch64" \
-      build/build.sh -j$(nproc --all) $extra
+      build/build.sh -j"$(nproc --all)" $extra
   else
     export PATH="$CLANG_PATH/bin:$PATH"
     LTO="$LTO_TYPE" \
       BUILD_CONFIG="$kernelDir/$kernelName/build.config.gki.aarch64" \
-      build/build.sh -j$(nproc --all) CC=clang CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE=aarch64-linux-gnu- $extra
+      build/build.sh -j"$(nproc --all)" CC=clang CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE=aarch64-linux-gnu- $extra
   fi
 }
 
 find_dist() {
-  DIST_DIR=$(find "$WORK_DIR/out" -maxdepth 3 -type d -name dist 2>/dev/null | head -n1)
+  DIST_DIR="$(find "$WORK_DIR/out" -maxdepth 3 -type d -name dist 2>/dev/null | head -n1)"
   [ -z "$DIST_DIR" ] && DIST_DIR="$WORK_DIR/out/dist"
   echo "dist dir: $DIST_DIR"
 }
@@ -307,14 +283,13 @@ apply_kpm() {
   log "Applying KPM patch"
   cd "$DIST_DIR"
   local url
-  url=$(curl -sL "$(json_get '.patches.kpmApi')" | jq -r '.assets[] | select(.name == "patch_linux") | .browser_download_url' | head -n1)
-  [ -z "$url" ] && url=$(json_get '.patches.kpmFallback')
+  url="$(curl -sL "$(json '.patches.kpmApi')" | jq -r '.assets[] | select(.name == "patch_linux") | .browser_download_url' | head -n1 || true)"
+  [ -z "$url" ] && url="$(json '.patches.kpmFallback')"
   echo "Using: $url"
   curl -fL -s -o patch_linux "$url"
   chmod +x patch_linux && ./patch_linux
   [ -f oImage ] && mv -f oImage Image
 }
-
 pack_erofs() {
   [ "$SYSTEM_DLKM_EROFS" = "true" ] || return 0
   log "Packing system_dlkm as EROFS"
@@ -325,7 +300,7 @@ pack_erofs() {
   rm -rf "$staging" system_dlkm.img
 
   local existing
-  existing=$(find "$WORK_DIR/out" -maxdepth 4 -name "system_dlkm.img" 2>/dev/null | head -n1)
+  existing="$(find "$WORK_DIR/out" -maxdepth 4 -name "system_dlkm.img" 2>/dev/null | head -n1)"
   if [ -n "$existing" ]; then
     log "Reusing system_dlkm.img from build output: $existing"
     cp -f "$existing" ./system_dlkm.img
@@ -334,13 +309,13 @@ pack_erofs() {
 
   log "No prebuilt system_dlkm.img found, collecting zram/zsmalloc modules"
   local mod_root
-  mod_root=$(find "$WORK_DIR/out" -maxdepth 5 -type d -path "*staging/lib/modules" 2>/dev/null | head -n1)
+  mod_root="$(find "$WORK_DIR/out" -maxdepth 5 -type d -path "*staging/lib/modules" 2>/dev/null | head -n1)"
   if [ -z "$mod_root" ]; then
     echo "::warning::no modules staging dir found, skipping EROFS pack"
     return 0
   fi
 
-  local ko rel dest deps dep dep_ko
+  local ko rel dest deps dep_ko
   for ko in $(find "$mod_root" \( -name "zram.ko" -o -name "zsmalloc.ko" \) 2>/dev/null); do
     rel="${ko#$mod_root/}"
     dest="$staging/lib/modules/$rel"
@@ -352,9 +327,9 @@ pack_erofs() {
   [ -f "$staging/lib/modules/kernel/drivers/block/zram/zram.ko" ] || echo "::warning::zram.ko missing from build output"
   [ -f "$staging/lib/modules/kernel/mm/zsmalloc.ko" ] || echo "::warning::zsmalloc.ko missing from build output"
 
-  deps=$(modinfo -F depends "$staging/lib/modules/kernel/drivers/block/zram/zram.ko" 2>/dev/null || true)
+  deps="$(modinfo -F depends "$staging/lib/modules/kernel/drivers/block/zram/zram.ko" 2>/dev/null || true)"
   for dep in ${deps//,/ }; do
-    dep_ko=$(find "$mod_root" -name "${dep}.ko" | head -n1)
+    dep_ko="$(find "$mod_root" -name "${dep}.ko" | head -n1)"
     if [ -n "$dep_ko" ]; then
       rel="${dep_ko#$mod_root/}"
       dest="$staging/lib/modules/$rel"
@@ -371,27 +346,28 @@ pack_erofs() {
   rm -rf "$staging"
   ls -la system_dlkm.img
 }
+
 package_ak3() {
   log "Packaging AnyKernel3"
   cd "$DIST_DIR"
   [ -f Image ] || die "Kernel image missing"
 
   cd "$WORK_DIR"
-  git clone --depth=1 "$(json_get '.repo.anyKernel3')" -b master AK3_Workspace
+  git clone --depth=1 "$(json '.repo.anyKernel3')" -b master AK3_Workspace
   rm -rf AK3_Workspace/.git
 
   local img_name
-  img_name=$(json_get ".variants.\"$VARIANT\".image")
+  img_name="$(json ".variants.\"$VARIANT\".image")"
   cp "$DIST_DIR/Image" "AK3_Workspace/$img_name"
 
   [ -f "$DIST_DIR/system_dlkm.img" ] && cp "$DIST_DIR/system_dlkm.img" AK3_Workspace/system_dlkm.img
 
   local build_time zip_name
-  build_time=$(date +'%Y-%m-%d')
+  build_time="$(date +'%Y-%m-%d')"
   zip_name="${VARIANT}_AK3_${KERNEL_BRANCH}_${build_time}"
-  echo "ZIP_NAME=$zip_name" >> "$GITHUB_ENV"
-  echo "AK3_DIR=$WORK_DIR/AK3_Workspace" >> "$GITHUB_ENV"
-  echo "ZIP_PATH=$WORK_DIR/AK3_Workspace" >> "$GITHUB_ENV"
+  echo "ZIP_NAME=$zip_name" >> "${GITHUB_ENV:-/dev/null}"
+  echo "AK3_DIR=$WORK_DIR/AK3_Workspace" >> "${GITHUB_ENV:-/dev/null}"
+  echo "ZIP_PATH=$WORK_DIR/AK3_Workspace" >> "${GITHUB_ENV:-/dev/null}"
   echo "Done: $zip_name"
 }
 

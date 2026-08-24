@@ -1,11 +1,12 @@
-﻿import os
-import sys
-import urllib.request
-import urllib.parse
 import json
+import os
+import subprocess
+import urllib.parse
+import urllib.request
+import uuid
 
-TOKEN = os.environ.get("TELEGRAM_TOKEN")
-CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
+TOKEN = os.environ.get("TELEGRAM_TOKEN", "")
+CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
 STATUS = os.environ.get("BUILD_STATUS", "unknown")
 RUN_URL = os.environ.get("RUN_URL", "")
 VARIANT = os.environ.get("VARIANT", "?")
@@ -17,34 +18,33 @@ TICK = os.environ.get("TICK_RATE", "?")
 SUSFS = os.environ.get("ENABLE_SUSFS", "false")
 BBG = os.environ.get("BBG", "off")
 KPM = os.environ.get("KPM", "off")
-SPOOF = os.environ.get("SPOOF_INTEGRITY", "off")
 KSUVER = os.environ.get("KSUVER", "")
 ZIP_PATH = os.environ.get("ZIP_PATH", "")
+ZIP_NAME = os.environ.get("ZIP_NAME", "kernel")
 
 DEVICE = "Redmi Note 12/13 4G NFC"
 
 
-def on(v):
-    return str(v).lower() in ("true", "on", "yes", "1")
+def enabled(value):
+    return str(value).lower() in ("true", "on", "yes", "1")
 
 
 def api(method, **data):
     url = f"https://api.telegram.org/bot{TOKEN}/{method}"
-    req = urllib.request.Request(url, urllib.parse.urlencode(data).encode())
+    request = urllib.request.Request(url, urllib.parse.urlencode(data).encode())
     try:
-        with urllib.request.urlopen(req, timeout=30) as r:
-            return json.load(r)
-    except Exception as e:
-        print(f"telegram {method} failed: {e}")
+        with urllib.request.urlopen(request, timeout=30) as response:
+            return json.load(response)
+    except Exception as error:
+        print(f"telegram {method} failed: {error}")
         return None
 
 
 def send_document(path, caption):
-    import uuid
     boundary = uuid.uuid4().hex
     name = os.path.basename(path)
-    with open(path, "rb") as f:
-        payload = f.read()
+    with open(path, "rb") as file:
+        payload = file.read()
 
     parts = []
     for field in (("chat_id", CHAT_ID), ("caption", caption), ("parse_mode", "HTML")):
@@ -62,20 +62,20 @@ def send_document(path, caption):
     parts.append(f"--{boundary}--\r\n".encode())
     body = b"".join(parts)
 
-    req = urllib.request.Request(
+    request = urllib.request.Request(
         f"https://api.telegram.org/bot{TOKEN}/sendDocument",
         data=body,
         headers={"Content-Type": f"multipart/form-data; boundary={boundary}"},
     )
     try:
-        with urllib.request.urlopen(req, timeout=300) as r:
-            return json.load(r)
-    except Exception as e:
-        print(f"upload failed: {e}")
+        with urllib.request.urlopen(request, timeout=300) as response:
+            return json.load(response)
+    except Exception as error:
+        print(f"upload failed: {error}")
         return None
 
 
-def build_caption():
+def caption():
     if STATUS != "success":
         return (
             "<b>❌ Shining Kernel Build Failed</b>\n\n"
@@ -92,12 +92,11 @@ def build_caption():
         f"• Kernel: Linux 5.15 (Android 13)\n"
         f"• Device: {DEVICE}\n"
         f"• Branch: {BRANCH}\n"
-        f"• Clang: {CLANG} | LTO: {LTO} | -{OPT} | {TICK}Hz\n\n"
+        f"• Clang: {CLANG} | LTO: {LTO} | -{OPT} | {TICK}Hz\n"
         "<b>⚙️ Features</b>\n"
-        f"{'✅' if on(SUSFS) else '❌'} SuSFS\n"
-        f"{'✅' if on(BBG) else '❌'} Baseband Guard\n"
-        f"{'✅' if on(KPM) else '❌'} KPM\n"
-        f"{'✅' if on(SPOOF) else '❌'} Integrity Spoof\n\n"
+        f"{'✅' if enabled(SUSFS) else '❌'} SuSFS\n"
+        f"{'✅' if enabled(BBG) else '❌'} Baseband Guard\n"
+        f"{'✅' if enabled(KPM) else '❌'} KPM\n"
         f'<a href="{RUN_URL}">🔍 View build</a>'
     )
 
@@ -107,18 +106,17 @@ def main():
         print("no telegram secrets set, skipping notify")
         return
 
-    caption = build_caption()
+    text = caption()
     zip_file = None
 
     if STATUS == "success" and ZIP_PATH and os.path.isdir(ZIP_PATH):
-        import subprocess
-        zip_file = f"/tmp/{os.environ.get('ZIP_NAME', 'kernel')}.zip"
+        zip_file = f"/tmp/{ZIP_NAME}.zip"
         subprocess.run(["zip", "-q", "-r9", zip_file, "./"], cwd=ZIP_PATH, check=True)
 
     if zip_file and os.path.isfile(zip_file):
-        send_document(zip_file, caption)
+        send_document(zip_file, text)
     else:
-        api("sendMessage", chat_id=CHAT_ID, text=caption, parse_mode="HTML")
+        api("sendMessage", chat_id=CHAT_ID, text=text, parse_mode="HTML")
 
 
 if __name__ == "__main__":
