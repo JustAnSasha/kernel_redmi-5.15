@@ -110,7 +110,7 @@ setup_toolchain() {
     log "Fetching latest AOSP clang"
     rm -rf .repo common
     local clang_ver
-    clang_ver="$(curl -s "https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+/refs/heads/main/?format=JSON" | sed '1d' | jq -r '.entries[].name' | grep -E '^clang-r[0-9]+' | sort -V | tail -n1 || true)"
+    clang_ver="$(curl -s "https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+/refs/heads/main/?format=JSON" | sed '1d' | jq -r '.entries[].name' | grep -E '^clang-r[0-9]+' [...]
     [ -z "$clang_ver" ] && clang_ver="$(json '.toolchain.aosp.version')"
     echo "Using: $clang_ver"
     local clang_dir="prebuilts/clang/host/linux-x86/$clang_ver"
@@ -172,26 +172,15 @@ configure_defconfig() {
   fi
 
   json '.defconfigExtras[]' >> "$cfg"
-
-  if [ "$SYSTEM_DLKM_EROFS" = "true" ]; then
-    log "zram/zsmalloc as modules for system_dlkm EROFS"
-    sed -i '/^CONFIG_ZRAM=/d; /^CONFIG_ZSMALLOC=/d; /^CONFIG_ZRAM_DEF_COMP/d; /^CONFIG_MODULE_COMPRESS/d' "$cfg"
-    cat >> "$cfg" << 'EOF'
-CONFIG_MODULE_UNLOAD=y
-CONFIG_MODULE_COMPRESS_GZIP=y
-CONFIG_ZSMALLOC=m
-CONFIG_ZRAM=m
-CONFIG_ZRAM_WRITEBACK=y
-EOF
-  fi
 }
+
 patch_extras() {
   cd "$SRC"
   if is_on "$BBG"; then
     log "Baseband-guard"
     wget -qO- "$(json '.patches.basebandGuard')" | bash
     echo "CONFIG_BBG=y" >> "arch/arm64/configs/$DEFCONFIG_NAME"
-    sed -i '/^config LSM$/,/^help$/{ /^[[:space:]]*default/ { /baseband_guard/! s/selinux/selinux,baseband_guard/ }' security/Kconfig
+    sed -i '/^config LSM$/,/^help$/{ /^[[:space:]]*default/{ /baseband_guard/! s/selinux/selinux,baseband_guard/; }; }' security/Kconfig
   fi
   if is_on "$DROIDSPACES"; then
     log "Droidspaces"
@@ -248,6 +237,7 @@ setup_susfs() {
   esac
   rm -rf susfs
 }
+
 configure_ksu_defconfig() {
   cd "$SRC"
   local cfg="arch/arm64/configs/$DEFCONFIG_NAME"
@@ -302,6 +292,7 @@ apply_kpm() {
   chmod +x patch_linux && ./patch_linux
   [ -f oImage ] && mv -f oImage Image
 }
+
 pack_erofs() {
   [ "$SYSTEM_DLKM_EROFS" = "true" ] || return 0
   log "Packing system_dlkm as EROFS"
