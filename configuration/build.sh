@@ -304,10 +304,16 @@ compile() {
   fi
 }
 
+find_dist() {
+  DIST_DIR=$(find "$WORK_DIR/out" -maxdepth 3 -type d -name dist 2>/dev/null | head -n1)
+  [ -z "$DIST_DIR" ] && DIST_DIR="$WORK_DIR/out/dist"
+  echo "dist dir: $DIST_DIR"
+}
+
 apply_kpm() {
   is_on "$KPM" || return 0
   log "Applying KPM patch"
-  cd "$WORK_DIR/out/dist"
+  cd "$DIST_DIR"
   local url
   url=$(curl -sL "$(json_get '.patches.kpmApi')" | jq -r '.assets[] | select(.name == "patch_linux") | .browser_download_url' | head -n1)
   [ -z "$url" ] && url=$(json_get '.patches.kpmFallback')
@@ -320,13 +326,29 @@ apply_kpm() {
 pack_erofs() {
   [ "$SYSTEM_DLKM_EROFS" = "true" ] || return 0
   log "Packing system_dlkm as EROFS"
-  cd "$WORK_DIR/out/dist"
+  cd "$DIST_DIR"
   [ -f Image ] || die "Kernel image missing"
 
   local staging="system_dlkm_staging"
   rm -rf "$staging" system_dlkm.img
+
+  local existing
+  existing=$(find "$WORK_DIR/out" -maxdepth 4 -name "system_dlkm.img" 2>/dev/null | head -n1)
+  if [ -n "$existing" ]; then
+    log "Reusing system_dlkm.img from build output: $existing"
+    cp -f "$existing" ./system_dlkm.img
+    return 0
+  fi
+
+  log "No prebuilt system_dlkm.img found, collecting modules manually"
+  local mod_root
+  mod_root=$(find "$WORK_DIR/out" -maxdepth 5 -type d -path "*staging/lib/modules" 2>/dev/null | head -n1)
+  if [ -z "$mod_root" ]; then
+    echo "::warning::no modules staging dir found, skipping EROFS pack"
+    return 0
+  fi
   mkdir -p "$staging/lib/modules"
-  find . -maxdepth 1 \( -name "*.ko" -o -name "*.ko.gz" \) -exec cp -f {} "$staging/lib/modules/" \;
+  find "$mod_root" \( -name "*.ko" -o -name "*.ko.gz" \) -exec cp -f {} "$staging/lib/modules/" \;
 
   for req in zram zsmalloc lz4 lz4hc zstd zcomp; do
     ls "$staging/lib/modules/" | grep -q "^${req}" && echo "packed ${req}.ko" || echo "::warning::${req}.ko not found in build output"
@@ -337,26 +359,26 @@ pack_erofs() {
   rm -rf "$staging"
   ls -la system_dlkm.img
 }
-
 package_ak3() {
   log "Packaging AnyKernel3"
-  cd "$WORK_DIR"
-  [ -f out/dist/Image ] || die "Kernel image missing"
+  cd "$DIST_DIR"
+  [ -f Image ] || die "Kernel image missing"
 
+  cd "$WORK_DIR"
   git clone --depth=1 "$(json_get '.repo.anyKernel3')" -b master AK3_Workspace
   rm -rf AK3_Workspace/.git
 
   local img_name
   img_name=$(json_get ".variants.\"$VARIANT\".image")
-  cp out/dist/Image "AK3_Workspace/$img_name"
+  cp "$DIST_DIR/Image" "AK3_Workspace/$img_name"
 
-  [ -f out/dist/system_dlkm.img ] && cp out/dist/system_dlkm.img AK3_Workspace/system_dlkm.img
+  [ -f "$DIST_DIR/system_dlkm.img" ] && cp "$DIST_DIR/system_dlkm.img" AK3_Workspace/system_dlkm.img
 
   local build_time zip_name
   build_time=$(date +'%Y-%m-%d')
   zip_name="${VARIANT}_AK3_${KERNEL_BRANCH}_${build_time}"
   echo "ZIP_NAME=$zip_name" >> "$GITHUB_ENV"
-  echo "AK3_DIR=$WORK_DIR/AK3_Workspace" >> "$GITHUB_ENV"
+  echo "AK3_DIR=$DIST_DIR/AK3_Workspace" >> "$GITHUB_ENV"
   echo "ZIP_PATH=$WORK_DIR/AK3_Workspace" >> "$GITHUB_ENV"
   echo "Done: $zip_name"
 }
@@ -373,6 +395,7 @@ setup_ksu
 setup_susfs
 configure_ksu_defconfig
 compile
+find_dist
 apply_kpm
 pack_erofs
 package_ak3
