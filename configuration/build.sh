@@ -208,15 +208,6 @@ setup_ksu() {
 
   curl -LSs "$setup_url" | bash -s "$setup_arg"
 
-  if [ "$VARIANT" = "ReSukiSU" ]; then
-    cd KernelSU
-    sed -i '/ccflags-y.*KSU_VERSION_FULL/d' kernel/Kbuild kernel/Makefile 2>/dev/null || true
-    echo 'ccflags-y += -DKSU_VERSION_FULL=\"@ReSukiSU'"${LOCAL_VERSION}"'\"' >> kernel/Kbuild
-    echo "KSUVER=ReSukiSU${LOCAL_VERSION}" >> "$GITHUB_ENV"
-    cd ..
-    return 0
-  fi
-
   local ksu_dir="$SRC/$dir"
   KSUVER=$(( $(git -C "$ksu_dir" rev-list --count HEAD) + offset ))
   echo "KSUVER=$KSUVER" >> "$GITHUB_ENV"
