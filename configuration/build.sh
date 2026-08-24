@@ -47,7 +47,9 @@ prepare_env() {
   log "Preparing environment"
   mkdir -p "$kernelDir"
   sudo apt-get update -qq
-  sudo apt-get install -y repo rsync aria2 jq erofs-utils zip ccache
+  # Add binutils and lld so clang has a linker available on the runner,
+  # and provide cross-binutils for aarch64 builds.
+  sudo apt-get install -y repo rsync aria2 jq erofs-utils zip ccache binutils lld gcc-aarch64-linux-gnu
 }
 
 free_space() {
