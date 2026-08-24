@@ -47,8 +47,6 @@ prepare_env() {
   log "Preparing environment"
   mkdir -p "$kernelDir"
   sudo apt-get update -qq
-  # Add binutils and lld so clang has a linker available on the runner,
-  # and provide cross-binutils for aarch64 builds.
   sudo apt-get install -y repo rsync aria2 jq erofs-utils zip ccache binutils lld gcc-aarch64-linux-gnu
 }
 
@@ -192,20 +190,74 @@ patch_extras() {
 
 setup_ksu() {
   [ "$VARIANT" = "Vanilla" ] && { log "Vanilla build, skipping KSU"; return 0; }
-  log "Setting up $VARIANT"
-  cd "$SRC"
-  rm -rf KernelSU KernelSU-Next drivers/kernelsu
+  log "Setting up $VARIANT (robust checkout)"
 
-  local setup_url setup_arg dir
+  cd "$SRC"
+  rm -rf KernelSU-Workspace KernelSU KernelSU-Next drivers/kernelsu
+
+  local setup_url setup_arg dir ksurepo ksu_input
   setup_url="$(json ".variants.\"$VARIANT\".ksu.setupUrl")"
   setup_arg="$(json ".variants.\"$VARIANT\".ksu.setupArg")"
   dir="$(json ".variants.\"$VARIANT\".ksu.dir")"
 
-  curl -LSs "$setup_url" | bash -s "$setup_arg"
+  if echo "$setup_url" | grep -qE 'github.com/.+/.+(\.git)?'; then
+    ksurepo="$(echo "$setup_url" | sed -E 's|.*github.com[:/]+([^/]+/[^/]+)(\.git)?$|\1|')"
+    ksu_input="${setup_arg:-dev-susfs}"
+    mkdir -p KernelSU-Workspace
+    cd KernelSU-Workspace
 
-  local ksu_dir="$SRC/$dir"
-  KSUVER="$(git -C "$ksu_dir" describe --tags --abbrev=0 2>/dev/null || git -C "$ksu_dir" rev-parse --short=8 HEAD)"
-  echo "KSUVER=$KSUVER" >> "${GITHUB_ENV:-/dev/null}"
+    retry() { local n=0; until [ "$n" -ge 5 ]; do "$@" && return 0; n=$((n+1)); sleep 5; done; return 1; }
+
+    if git ls-remote --heads "https://github.com/$ksurepo.git" "$ksu_input" | grep -q .; then
+      rm -rf KernelSU-Repo
+      retry git clone --depth=50 --single-branch --branch "$ksu_input" "https://github.com/$ksurepo.git" KernelSU-Repo
+    else
+      rm -rf KernelSU-Repo
+      git clone --depth=50 "https://github.com/$ksurepo.git" KernelSU-Repo
+      (cd KernelSU-Repo && git fetch --depth=50 origin "$ksu_input" || true)
+      (cd KernelSU-Repo && git checkout --detach "$ksu_input" || true)
+    fi
+
+    if [ -d KernelSU-Repo ]; then
+      cd KernelSU-Repo || return 0
+      if [ -f kernel/setup.sh ]; then
+        bash kernel/setup.sh "$setup_arg" || true
+      elif [ -f setup.sh ]; then
+        bash setup.sh "$setup_arg" || true
+      else
+        cd "$WORK_DIR"
+        curl -LSs "$setup_url" | bash -s "$setup_arg" || true
+      fi
+
+      BASE_BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null | sed 's:-.*::' || true)
+      BASE_COMMIT=$(git merge-base HEAD refs/remotes/origin/$BASE_BRANCH 2>/dev/null || git merge-base HEAD refs/remotes/origin/main 2>/dev/null || echo HEAD)
+      COMMITS_COUNT=$(git rev-list --count "$BASE_COMMIT" 2>/dev/null || echo 0)
+      BASE_VERSION=30000
+      KSU_VERSION=$((BASE_VERSION + COMMITS_COUNT))
+      KSU_COMMIT=$(git rev-parse --short HEAD 2>/dev/null || true)
+      KSU_GIT_TAG=$(git describe --tags --abbrev=0 "$BASE_COMMIT" 2>/dev/null || echo "")
+
+      if [ -f "$SRC/$dir/Kbuild" ]; then
+        sed -i "s/^KSU_VERSION_FALLBACK := .*/KSU_VERSION_FALLBACK := ${KSU_VERSION}/" "$SRC/$dir/Kbuild" 2>/dev/null || true
+      fi
+
+      KSUVER="${KSU_COMMIT:-$KSU_VERSION}"
+      echo "KSUVER=$KSUVER" >> "${GITHUB_ENV:-/dev/null}"
+      echo "KSU_COMMIT=$KSU_COMMIT" >> "${GITHUB_ENV:-/dev/null}"
+      echo "KSU_VERSION=$KSU_VERSION" >> "${GITHUB_ENV:-/dev/null}"
+      echo "KSU_GIT_TAG=$KSU_GIT_TAG" >> "${GITHUB_ENV:-/dev/null}"
+
+      if [ -d kernel ]; then
+        mv -f kernel "$SRC/$dir" 2>/dev/null || true
+      fi
+    fi
+  else
+    log "Falling back to remote setup script"
+    curl -LSs "$setup_url" | bash -s "$setup_arg"
+    local ksu_dir="$SRC/$dir"
+    KSUVER="$(git -C "$ksu_dir" describe --tags --abbrev=0 2>/dev/null || git -C "$ksu_dir" rev-parse --short=8 HEAD)"
+    echo "KSUVER=$KSUVER" >> "${GITHUB_ENV:-/dev/null}"
+  fi
 }
 
 setup_susfs() {
