@@ -17,8 +17,8 @@ DROIDSPACES="${DROIDSPACES:-off}"
 ENABLE_SUSFS="${ENABLE_SUSFS:-true}"
 SYSTEM_DLKM_EROFS="${SYSTEM_DLKM_EROFS:-false}"
 
-KERNEL_BRANCH="${KERNEL_BRANCH:-$(jq -r '.repo.kernelBranch' "$CFG")}"
-KERNEL_SOURCE_URL="${KERNEL_SOURCE_URL:-$(jq -r '.repo.kernelSourceURL' "$CFG")}"
+KERNEL_BRANCH="${KERNEL_BRANCH:-$(jq -r '.repo.kernelBranch' "$CFG") }"
+KERNEL_SOURCE_URL="${KERNEL_SOURCE_URL:-$(jq -r '.repo.kernelSourceURL' "$CFG") }"
 KERNEL_SPOOF_VERSION="${KERNEL_SPOOF_VERSION:-}"
 LOCAL_VERSION="${LOCAL_VERSION:-}"
 
@@ -110,7 +110,7 @@ setup_toolchain() {
     log "Fetching latest AOSP clang"
     rm -rf .repo common
     local clang_ver
-    clang_ver="$(curl -s "https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+/refs/heads/main/?format=JSON" | sed '1d' | jq -r '.entries[].name' | grep -E '^clang-r[0-9]+' [...]
+    clang_ver="$(curl -s "https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+/refs/heads/main/?format=JSON" | sed '1d' | jq -r '.entries[].name' | grep -E '^clang-r[0-9]+' | head -n1 || true)"
     [ -z "$clang_ver" ] && clang_ver="$(json '.toolchain.aosp.version')"
     echo "Using: $clang_ver"
     local clang_dir="prebuilts/clang/host/linux-x86/$clang_ver"
@@ -138,7 +138,7 @@ setup_toolchain() {
   fi
 
   sed -i '/^DEFCONFIG=gki_defconfig/d' "$kd/build.config.gki"
-  sed -i '$a\DEFCONFIG='"$DEFCONFIG_NAME" "$kd/build.config.gki"
+  sed -i '$a\DEFCONFIG='"$DEFCONFIG_NAME" "${kd}/build.config.gki"
   sed -i '/^POST_DEFCONFIG_CMDS="check_defconfig"/d' "$kd/build.config.gki"
   sed -i \
     -e '/^KMI_SYMBOL_LIST_STRICT_MODE=/d' -e '/^TRIM_NONLISTED_KMI=/d' -e '/^KMI_ENFORCED=/d' \
