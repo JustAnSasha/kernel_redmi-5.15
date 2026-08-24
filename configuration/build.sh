@@ -11,6 +11,7 @@ OPT_LEVEL="${OPT_LEVEL:-O3}"
 TICK_RATE="${TICK_RATE:-250}"
 LTO_TYPE="${LTO_TYPE:-thin}"
 BBG="${BBG:-on}"
+SPOOF_INTEGRITY="${SPOOF_INTEGRITY:-off}"
 KPM="${KPM:-off}"
 DROIDSPACES="${DROIDSPACES:-off}"
 ENABLE_SUSFS="${ENABLE_SUSFS:-true}"
@@ -87,6 +88,17 @@ spoof_version() {
   [ -f build.config.constants ] && \
     sed -i "s/^KERNEL_VERSION=.*/KERNEL_VERSION=${KERNEL_SPOOF_VERSION}${LOCAL_VERSION}/" build.config.constants
 }
+
+spoof_integrity() {
+  is_on "$SPOOF_INTEGRITY" || return 0
+  log "Applying integrity spoof patch"
+  cd "$SRC"
+  curl -Lso spoof-integrity.patch \
+    "https://raw.githubusercontent.com/ShiningAsStar/extra_kernel_stuff/main/patches/spoof-kernel-integrity.patch"
+  patch -p1 --forward < spoof-integrity.patch || true
+  rm -f spoof-integrity.patch
+}
+
 setup_toolchain() {
   log "Syncing build tools"
   cd "$WORK_DIR"
@@ -376,6 +388,7 @@ free_space
 add_swap
 clone_kernel
 spoof_version
+spoof_integrity
 setup_toolchain
 configure_defconfig
 patch_extras

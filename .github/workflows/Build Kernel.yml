@@ -83,6 +83,14 @@ on:
         options:
           - on
           - off
+      spoofIntegrity:
+        description: Integrity spoof
+        required: true
+        type: choice
+        default: off
+        options:
+          - on
+          - off
       LtoOptimizations:
         description: LTO type
         required: true
@@ -149,6 +157,7 @@ jobs:
           CLANG_VERSION: ${{ inputs.clangVersion }}
           TICK_RATE: ${{ inputs.tickRate }}
           BBG: ${{ inputs.bbg }}
+          SPOOF_INTEGRITY: ${{ inputs.spoofIntegrity }}
           LTO_TYPE: ${{ inputs.LtoOptimizations }}
           KPM: ${{ inputs.KPM }}
           DROIDSPACES: ${{ inputs.droidspaces }}
