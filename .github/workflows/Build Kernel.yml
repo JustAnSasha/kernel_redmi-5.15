@@ -136,6 +136,9 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Ensure ccache dir
+        run: mkdir -p .ccache
+
       - name: Restore ccache
         uses: actions/cache@v4
         with:
