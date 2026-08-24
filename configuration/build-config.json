@@ -1,0 +1,163 @@
+﻿{
+    "device":  {
+                   "name":  "Redmi Note 12/13 4G NFC",
+                   "codename":  "topaz/tapas",
+                   "kernelVersion":  "5.15",
+                   "androidVersion":  "13",
+                   "androidBranch":  "common-android13-5.15-lts"
+               },
+    "repo":  {
+                 "kernelSourceURL":  "https://github.com/ShiningAsStar/kernel_redmi-5.15",
+                 "kernelBranch":  "shining",
+                 "anyKernel3":  "https://github.com/ShiningAsStar/AnyKernel3",
+                 "extraStuff":  "https://raw.githubusercontent.com/ShiningAsStar/extra_kernel_stuff/main"
+             },
+    "toolchain":  {
+                      "aosp":  {
+                                   "name":  "AOSP",
+                                   "url":  "https://github.com/yougotme101/clang/releases/download/v1.0.1/clang-r596125.tar.gz",
+                                   "version":  "r596125"
+                               },
+                      "zycromerz":  {
+                                        "name":  "ZyCromerZ",
+                                        "releaseApi":  "https://api.github.com/repos/ZyCromerZ/Clang/releases/latest",
+                                        "fallbackUrl":  "https://github.com/ZyCromerZ/Clang/releases/download/19.0.0git-20240723-release/Clang-19.0.0git-20240723.tar.gz"
+                                    }
+                  },
+    "patches":  {
+                    "tickrate":  "patches/custom-tickrate-options.patch",
+                    "spoofIntegrity":  "patches/spoof-kernel-integrity.patch",
+                    "susfsKernel":  "patches/50_add_susfs_in_gki-android13-5.15.patch",
+                    "droidspaces":  "https://raw.githubusercontent.com/ravindu644/Droidspaces-OSS/main/Documentation/resources/kernel-patches/GKI/below-kernel-6.12/001.GKI-below-6.12-fix_sysvipc_kabi_6_7_8.patch",
+                    "basebandGuard":  "https://github.com/vc-teahouse/Baseband-guard/raw/main/setup.sh",
+                    "susfsRepo":  "https://gitlab.com/simonpunk/susfs4ksu.git",
+                    "susfsBranch":  "gki-android13-5.15",
+                    "wildSusfsFix":  "https://github.com/WildKernels/kernel_patches.git",
+                    "kpmApi":  "https://api.github.com/repos/SukiSU-Ultra/SukiSU_KernelPatch_patch/releases/latest",
+                    "kpmFallback":  "https://github.com/SukiSU-Ultra/SukiSU_KernelPatch_patch/releases/download/0.13.0/patch_linux"
+                },
+    "defconfigExtras":  [
+                            "CONFIG_STRIP_ASM_SYMS=y",
+                            "CONFIG_LD_DEAD_CODE_DATA_ELIMINATION=y",
+                            "CONFIG_TCP_CONG_ADVANCED=y",
+                            "CONFIG_TCP_CONG_WESTWOOD=y",
+                            "CONFIG_TCP_CONG_BBR=y",
+                            "CONFIG_DEFAULT_WESTWOOD=y",
+                            "CONFIG_NET_SCH_FQ=y",
+                            "CONFIG_NET_SCH_FQ_CODEL=y",
+                            "CONFIG_ZRAM=y",
+                            "CONFIG_ZRAM_MULTI_COMP=y",
+                            "CONFIG_ZSMALLOC=y",
+                            "CONFIG_ZSMALLOC_STAT=y",
+                            "CONFIG_CRYPTO_LZ4=y",
+                            "CONFIG_CRYPTO_LZ4HC=y",
+                            "CONFIG_CRYPTO_ZSTD=y",
+                            "CONFIG_ZRAM_DEF_COMP_LZ4=y",
+                            "CONFIG_TMPFS_XATTR=y",
+                            "CONFIG_TMPFS_POSIX_ACL=y",
+                            "CONFIG_PM_WAKELOCKS=y",
+                            "CONFIG_PM_WAKELOCKS_GC=y",
+                            "CONFIG_PM_WAKELOCKS_LIMIT=100"
+                        ],
+    "susfsConfig":  [
+                        "CONFIG_KSU_SUSFS=y",
+                        "CONFIG_KSU_SUSFS_HAS_MAGIC_MOUNT=y",
+                        "CONFIG_KSU_SUSFS_SUS_PATH=y",
+                        "CONFIG_KSU_SUSFS_SUS_MOUNT=y",
+                        "CONFIG_KSU_SUSFS_AUTO_ADD_SUS_KSU_DEFAULT_MOUNT=y",
+                        "CONFIG_KSU_SUSFS_AUTO_ADD_SUS_BIND_MOUNT=y",
+                        "CONFIG_KSU_SUSFS_AUTO_ADD_TRY_UMOUNT_FOR_BIND_MOUNT=y",
+                        "CONFIG_KSU_SUSFS_SUS_KSTAT=y",
+                        "CONFIG_KSU_SUSFS_TRY_UMOUNT=y",
+                        "CONFIG_KSU_SUSFS_SPOOF_UNAME=y",
+                        "CONFIG_KSU_SUSFS_ENABLE_LOG=y",
+                        "CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS=y",
+                        "CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG=y",
+                        "CONFIG_KSU_SUSFS_OPEN_REDIRECT=y",
+                        "CONFIG_KSU_SUSFS_SUS_MAP=y",
+                        "CONFIG_KSU_SUSFS_SUS_SU=y"
+                    ],
+    "ksuBaseConfig":  [
+                          "CONFIG_KSU=y",
+                          "CONFIG_KPROBES=y",
+                          "CONFIG_OVERLAY_FS=y",
+                          "CONFIG_TMPFS_XATTR=y",
+                          "CONFIG_TMPFS_POSIX_ACL=y",
+                          "CONFIG_KALLSYMS=y"
+                      ],
+    "variants":  {
+                     "Vanilla":  {
+                                     "label":  "Vanilla",
+                                     "ksu":  null,
+                                     "llvm":  false,
+                                     "kpm":  false,
+                                     "image":  "Image.Vanilla"
+                                 },
+                     "KernelSU":  {
+                                      "label":  "KernelSU",
+                                      "ksu":  {
+                                                  "versionOffset":  11300,
+                                                  "setupArg":  "main",
+                                                  "dir":  "KernelSU",
+                                                  "type":  "kernelsu",
+                                                  "apiFallback":  "11800",
+                                                  "setupUrl":  "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh"
+                                              },
+                                      "llvm":  false,
+                                      "kpm":  false,
+                                      "image":  "Image.KernelSU"
+                                  },
+                     "KernelSU-Next":  {
+                                           "label":  "KernelSU-Next",
+                                           "ksu":  {
+                                                       "wildFixPatches":  [
+                                                                              "fix_Kbuild.patch",
+                                                                              "fix_init.c.patch",
+                                                                              "fix_kernel_umount.c.patch",
+                                                                              "fix_setuid_hook.c.patch",
+                                                                              "fix_sucompat.c.patch",
+                                                                              "fix_supercall.c.patch",
+                                                                              "ksu_toolkit.patch",
+                                                                              "overwrite_hook_mode.patch"
+                                                                          ],
+                                                       "wildFixDir":  "next/susfs_fix_patches/stable/v2.2.0",
+                                                       "dir":  "drivers/kernelsu",
+                                                       "apiFallback":  "12200",
+                                                       "type":  "kernelsu-next",
+                                                       "setupArg":  "dev",
+                                                       "setupUrl":  "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/refs/heads/dev/kernel/setup.sh",
+                                                       "versionOffset":  12000
+                                                   },
+                                           "llvm":  false,
+                                           "kpm":  false,
+                                           "image":  "Image.KernelSU-Next"
+                                       },
+                     "ReSukiSU":  {
+                                      "label":  "ReSukiSU",
+                                      "llvm":  true,
+                                      "kpm":  true,
+                                      "image":  "Image.ReSukiSU",
+                                      "packSystemDlkm":  true,
+                                      "ksu":  {
+                                                  "dir":  "KernelSU",
+                                                  "setupUrl":  "https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/main/kernel/setup.sh",
+                                                  "type":  "resukisu",
+                                                  "setupArg":  "main"
+                                              }
+                                  },
+                     "SukiSU-Ultra":  {
+                                          "label":  "SukiSU-Ultra",
+                                          "ksu":  {
+                                                      "versionOffset":  37185,
+                                                      "setupArg":  "susfs_new",
+                                                      "dir":  "KernelSU",
+                                                      "type":  "sukisu-ultra",
+                                                      "apiFallback":  "12800",
+                                                      "setupUrl":  "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/builtin/kernel/setup.sh"
+                                                  },
+                                          "llvm":  false,
+                                          "kpm":  true,
+                                          "image":  "Image.SukiSU-Ultra"
+                                      }
+                 }
+}

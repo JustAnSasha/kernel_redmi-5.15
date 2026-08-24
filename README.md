@@ -1,43 +1,60 @@
-# 🚀 Android Kernel Builder
-## ⚠️ Important Notice
+﻿# Shining Kernel
 
-This workflow is configured for specific devices. **You must modify the settings for your device** or it may not work properly.
+GKI kernel builds for **Redmi Note 12 / Note 13 4G NFC** (topaz/tapas), based on `android13-5.15`.
 
-## 🔧 Quick Start
+One workflow, one config file, one build script. Pick a variant, hit run, get a flashable zip.
 
-1. **Fork this repository**
-2. Go to **Actions** tab → **"Build kernels"** workflow
-3. Click **"Run workflow"** and configure:
+## Variants
 
-### Workflow Settings
+| Variant | Notes |
+|---|---|
+| Vanilla | No root, clean GKI |
+| KernelSU | Upstream tiann/KernelSU |
+| KernelSU-Next | dev branch + WildKernels susfs fix patches |
+| ReSukiSU | LLVM=1 build, packs system_dlkm.img |
+| SukiSU-Ultra | builtin branch, KPM supported |
 
-| Setting | Description | Default |
-|---------|-------------|---------|
-| **Kernel source URL** | Your kernel repository URL | `https://github.com/ShiningAsStar/kernel_redmi-5.15` |
-| **Kernel branch** | Branch to build from | `shining` |
-| **Device** | Device name for defconfig | `gki` |
-| **Custom localversion** | Add custom version suffix | (empty) |
-| **Build KSU variant** | Include KernelSU version | `true` |
-| **LTO mode** | Optimization level | `thin` |
+## Usage
 
-4. **Wait for build** (20-40 minutes)
-5. **Download** the flashable ZIP from artifacts
+Actions → **Build Kernel** → Run workflow.
 
-## 📱 Telegram Notifications (Optional)
+Everything is configurable from the dispatch menu: SUSFS, BBG, KPM, droidspaces, integrity spoof, tick rate, LTO type, opt level, clang toolchain, spoofed kernel version. There's also a `systemDlkmErofs` toggle that flips zram/zsmalloc to modules and packs them into an EROFS `system_dlkm.img` inside the AnyKernel3 zip.
 
-Get build results sent to Telegram:
+Build takes roughly 30-60 min depending on LTO. The zip lands in artifacts and gets sent to Telegram if you've set the secrets.
 
-1. Create a bot with [@BotFather](https://t.me/BotFather)
-2. Get your chat ID from [@GetIDsBot](https://t.me/GetIDsBot)
-3. Add these secrets in repository **Settings** → **Secrets**:
-   - `TELEGRAM_BOT_TOKEN`
-   - `TELEGRAM_USER_ID`
+## How it's wired
 
-## 🤝 Credits
+```
+.github/workflows/Build Kernel.yml   <- thin dispatcher, just inputs
+configuration/build-config.json      <- all URLs, variants, defconfig opts
+configuration/build.sh               <- does everything
+configuration/notify.py              <- telegram upload/notification
+```
 
-- **@PhamtomK12** – Original builder
-- **@belowzeroiq** - Kernel Source
+The YAML doesn't contain any build logic. If you want to change a patch URL, add a KSU variant or tweak defconfig options, edit `build-config.json`. Build steps themselves live in `build.sh`.
 
----
+Clang (ZyCromerZ) and the KPM patcher are fetched from their latest GitHub releases at build time, with pinned fallbacks in the JSON.
 
-**Ready to build? Hit that "Run workflow" button! 🎉**
+## Telegram notifications
+
+Set these repo secrets:
+
+- `TELEGRAM_BOT_TOKEN`
+- `TELEGRAM_USER_ID`
+
+Get a token from [@BotFather](https://t.me/BotFather), your chat id from [@userinfobot](https://t.me/userinfobot). Without secrets the notify step silently skips.
+
+Optional: `TELEGRAPH_TOKEN` is no longer used.
+
+## Flashing
+
+Flash the AnyKernel3 zip via TWRP / KernelFlasher / custom recovery. If the zip contains a `system_dlkm.img`, flash that too (EROFS format).
+
+Not responsible for bricked devices, lost data, exploded phones, etc.
+
+## Credits
+
+- [KernelSU](https://github.com/tiann/KernelSU) / [KernelSU-Next](https://github.com/KernelSU-Next/KernelSU-Next) / [SukiSU-Ultra](https://github.com/SukiSU-Ultra/SukiSU-Ultra) / [ReSukiSU](https://github.com/ReSukiSU/ReSukiSU)
+- [SuSFS](https://gitlab.com/simonpunk/susfs4ksu) by simonpunk
+- [Baseband-guard](https://github.com/vc-teahouse/Baseband-guard)
+- [AnyKernel3](https://github.com/osm0sis/AnyKernel3)
