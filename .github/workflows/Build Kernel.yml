@@ -20,7 +20,7 @@ on:
         type: string
         default: https://github.com/ShiningAsStar/kernel_redmi-5.15
       kernelBranch:
-        description: Kernel branch
+        description: Kernel branch (shining-oplus = OnePlus drivers for OxygenOS/ColorOS 16 ports)
         required: true
         type: choice
         default: shining

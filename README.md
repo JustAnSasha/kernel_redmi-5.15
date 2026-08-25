@@ -6,8 +6,8 @@ GKI kernel builds for **Redmi Note 12 4G** (`topaz`/`tapas`) and **Redmi Note 13
 
 | Branch | Target |
 |---|---|
-| `shining` | Redmi Note 12 4G (topaz/tapas) + Redmi Note 13 4G (sapphire/sapphiren) |
-| `shining-oplus` | OnePlus/Realme rebrands on the same SoC |
+| `shining` | Redmi Note 12 4G (topaz/tapas) + Redmi Note 13 4G (sapphire/sapphiren), stock HyperOS/MIUI ROMs |
+| `shining-oplus` | Same devices, with OnePlus drivers — built for OxygenOS 16 / ColorOS 16 ports |
 
 Pick the branch from the workflow dispatch menu — everything downstream (zip name, ccache key, Telegram report) follows it automatically.
 
