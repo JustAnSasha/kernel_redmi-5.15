@@ -26,6 +26,7 @@ on:
         default: shining
         options:
           - shining
+          - shining-oplus
       kernelDevice:
         description: Device defconfig
         required: true
@@ -115,8 +116,8 @@ on:
         options:
           - on
           - off
-      systemDlkmErofs:
-        description: Pack system_dlkm as EROFS
+      systemDlkm:
+        description: Include system_dlkm in the zip
         required: true
         type: boolean
         default: false
@@ -130,7 +131,7 @@ concurrency:
 
 jobs:
   build:
-    name: Build ${{ inputs.variant }}
+    name: ${{ inputs.variant }} @ ${{ inputs.kernelBranch }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -143,9 +144,9 @@ jobs:
         uses: actions/cache@v4
         with:
           path: .ccache
-          key: ccache-${{ inputs.variant }}-${{ github.run_id }}
+          key: ccache-${{ inputs.variant }}-${{ inputs.kernelBranch }}-${{ github.run_id }}
           restore-keys: |
-            ccache-${{ inputs.variant }}-
+            ccache-${{ inputs.variant }}-${{ inputs.kernelBranch }}-
 
       - name: Build
         env:
@@ -164,7 +165,7 @@ jobs:
           LTO_TYPE: ${{ inputs.LtoOptimizations }}
           KPM: ${{ inputs.KPM }}
           DROIDSPACES: ${{ inputs.droidspaces }}
-          SYSTEM_DLKM_EROFS: ${{ inputs.systemDlkmErofs }}
+          SYSTEM_DLKM: ${{ inputs.systemDlkm }}
         run: bash configuration/build.sh
 
       - name: Upload artifact
@@ -192,6 +193,11 @@ jobs:
           ENABLE_SUSFS: ${{ inputs.SUSFS }}
           BBG: ${{ inputs.bbg }}
           KPM: ${{ inputs.KPM }}
+          DROIDSPACES: ${{ inputs.droidspaces }}
+          SPOOF_INTEGRITY: ${{ inputs.spoofIntegrity }}
           KSUVER: ${{ env.KSUVER }}
+          KERNEL_VERSION: ${{ env.KERNEL_MAKE_VERSION }}
+          SPOOFED_VERSION: ${{ inputs.kernelSpoofVersion }}
+          LOCAL_VERSION: ${{ inputs.localVersion }}
           ZIP_PATH: ${{ env.ZIP_PATH }}
         run: python3 configuration/notify.py

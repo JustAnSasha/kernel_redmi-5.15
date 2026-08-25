@@ -11,6 +11,9 @@ STATUS = os.environ.get("BUILD_STATUS", "unknown")
 RUN_URL = os.environ.get("RUN_URL", "")
 VARIANT = os.environ.get("VARIANT", "?")
 BRANCH = os.environ.get("KERNEL_BRANCH", "?")
+KERNEL_VERSION = os.environ.get("KERNEL_VERSION", "5.15")
+SPOOFED_VERSION = os.environ.get("SPOOFED_VERSION", "")
+LOCAL_VERSION = os.environ.get("LOCAL_VERSION", "")
 CLANG = os.environ.get("CLANG_VERSION", "?")
 LTO = os.environ.get("LTO_TYPE", "?")
 OPT = os.environ.get("OPT_LEVEL", "?")
@@ -18,15 +21,22 @@ TICK = os.environ.get("TICK_RATE", "?")
 SUSFS = os.environ.get("ENABLE_SUSFS", "false")
 BBG = os.environ.get("BBG", "off")
 KPM = os.environ.get("KPM", "off")
+DROIDSPACES = os.environ.get("DROIDSPACES", "off")
+INTEGRITY = os.environ.get("SPOOF_INTEGRITY", "off")
+DLKM = os.environ.get("SYSTEM_DLKM_PACKED", "false")
 KSUVER = os.environ.get("KSUVER", "")
 ZIP_PATH = os.environ.get("ZIP_PATH", "")
 ZIP_NAME = os.environ.get("ZIP_NAME", "kernel")
 
-DEVICE = "Redmi Note 12/13 4G NFC"
+DEVICE = "Redmi Note 12 4G (topaz/tapas) · Redmi Note 13 4G (sapphire/sapphiren)"
 
 
 def enabled(value):
     return str(value).lower() in ("true", "on", "yes", "1")
+
+
+def mark(flag):
+    return "\u2705" if enabled(flag) else "\u274c"
 
 
 def api(method, **data):
@@ -54,17 +64,16 @@ def send_document(path, caption):
     parts.append(
         (
             f"--{boundary}\r\nContent-Disposition: form-data; name=\"document\"; filename=\"{name}\"\r\n"
-            "Content-Type: application/octet-stream\r\n\r\n"
+            "Content-Type: application/zip\r\n\r\n"
         ).encode()
         + payload
         + b"\r\n"
     )
     parts.append(f"--{boundary}--\r\n".encode())
-    body = b"".join(parts)
 
     request = urllib.request.Request(
         f"https://api.telegram.org/bot{TOKEN}/sendDocument",
-        data=body,
+        data=b"".join(parts),
         headers={"Content-Type": f"multipart/form-data; boundary={boundary}"},
     )
     try:
@@ -76,29 +85,34 @@ def send_document(path, caption):
 
 
 def caption():
+    title = "\u2705 Kernel Build Successful" if STATUS == "success" else "\u274c Kernel Build Failed"
+    lines = [
+        f"<b>{title}</b>\n",
+        f"<b>\U0001f4e6 Build Information:</b>",
+        f"\u2022 Kernel: Linux {KERNEL_VERSION}",
+        f"\u2022 Devices: <b>{DEVICE}</b>",
+        f"\u2022 Branch: <code>{BRANCH}</code>",
+    ]
+    if SPOOFED_VERSION:
+        lines.append(f"\u2022 Spoofed to: <code>{SPOOFED_VERSION}{LOCAL_VERSION}</code>")
     if STATUS != "success":
-        return (
-            "<b>❌ Shining Kernel Build Failed</b>\n\n"
-            f"• Variant: <b>{VARIANT}</b>\n"
-            f"• Branch: {BRANCH}\n"
-            f'• <a href="{RUN_URL}">View logs</a>'
-        )
-
-    ksu_line = f" ({KSUVER})" if KSUVER else ""
-    return (
-        "<b>✅ Shining Kernel Build Successful</b>\n\n"
-        "<b>📦 Build Info</b>\n"
-        f"• Variant: <b>{VARIANT}</b>{ksu_line}\n"
-        f"• Kernel: Linux 5.15 (Android 13)\n"
-        f"• Device: {DEVICE}\n"
-        f"• Branch: {BRANCH}\n"
-        f"• Clang: {CLANG} | LTO: {LTO} | -{OPT} | {TICK}Hz\n"
-        "<b>⚙️ Features</b>\n"
-        f"{'✅' if enabled(SUSFS) else '❌'} SuSFS\n"
-        f"{'✅' if enabled(BBG) else '❌'} Baseband Guard\n"
-        f"{'✅' if enabled(KPM) else '❌'} KPM\n"
-        f'<a href="{RUN_URL}">🔍 View build</a>'
-    )
+        lines += ["", f'<a href="{RUN_URL}">\U0001f50d Check the logs</a>']
+        return "\n".join(lines)
+    lines += [
+        "",
+        f"<b>\u26a1KSU Variant:</b>",
+        f"\u2022 Variant: <b>{VARIANT}</b> <code>({KSUVER})</code>" if VARIANT != "Vanilla" else "\u2022 Variant: <b>Vanilla</b> (no root)",
+        f"\u2022 SuSFS: {mark(SUSFS)} {'Enabled' if enabled(SUSFS) else 'Disabled'}",
+        f"\u2022 Baseband Guard: {mark(BBG)} {'Enabled' if enabled(BBG) else 'Disabled'}",
+        f"\u2022 KPM: {mark(KPM)} {'Enabled' if enabled(KPM) else 'Disabled'}",
+        f"\u2022 Droidspaces: {mark(DROIDSPACES)} {'Enabled' if enabled(DROIDSPACES) else 'Disabled'}",
+        f"\u2022 Integrity Spoof: {mark(INTEGRITY)} {'Enabled' if enabled(INTEGRITY) else 'Disabled'}",
+        f"\u2022 system_dlkm packed: {mark(DLKM)}",
+        "",
+        f"<i>Clang {CLANG} \u00b7 LTO {LTO} \u00b7 -{OPT} \u00b7 {TICK}Hz</i>",
+        f'<a href="{RUN_URL}">\U0001f50d View build</a>',
+    ]
+    return "\n".join(lines)
 
 
 def main():

@@ -15,7 +15,7 @@ SPOOF_INTEGRITY="${SPOOF_INTEGRITY:-off}"
 KPM="${KPM:-off}"
 DROIDSPACES="${DROIDSPACES:-off}"
 ENABLE_SUSFS="${ENABLE_SUSFS:-true}"
-SYSTEM_DLKM_EROFS="${SYSTEM_DLKM_EROFS:-false}"
+SYSTEM_DLKM="${SYSTEM_DLKM:-false}"
 
 KERNEL_BRANCH="${KERNEL_BRANCH:-$(jq -r '.repo.kernelBranch' "$CFG") }"
 KERNEL_SOURCE_URL="${KERNEL_SOURCE_URL:-$(jq -r '.repo.kernelSourceURL' "$CFG") }"
@@ -28,7 +28,7 @@ DEFCONFIG_NAME="${KERNEL_DEVICE}_defconfig"
 SRC="$WORK_DIR/$kernelDir/$kernelName"
 DIST_DIR="$WORK_DIR/out/dist"
 
-log() { echo -e "\033[1;36m==> $1\033[0m"; }
+log() { echo -e "\033[1;35m==> $1\033[0m"; }
 die() { echo "::error::$1"; exit 1; }
 json() { jq -r "$1" "$CFG"; }
 is_on() { [[ "$1" == "on" || "$1" == "true" ]]; }
@@ -47,7 +47,7 @@ prepare_env() {
   log "Preparing environment"
   mkdir -p "$kernelDir"
   sudo apt-get update -qq
-  sudo apt-get install -y repo rsync aria2 jq erofs-utils zip ccache binutils lld gcc-aarch64-linux-gnu
+  sudo apt-get install -y repo rsync aria2 jq zip ccache binutils lld gcc-aarch64-linux-gnu
 }
 
 free_space() {
@@ -70,8 +70,16 @@ add_swap() {
 }
 
 clone_kernel() {
-  log "Cloning kernel source"
+  log "Cloning kernel source ($KERNEL_BRANCH)"
   git clone --recursive --branch "$KERNEL_BRANCH" "$KERNEL_SOURCE_URL" "$SRC" --depth=1
+  log "Reading kernel version from Makefile"
+  local ver
+  ver="$(sed -n 's/^VERSION *= *//p' "$SRC/Makefile").$(sed -n 's/^PATCHLEVEL *= *//p' "$SRC/Makefile")"
+  local sub
+  sub="$(sed -n 's/^SUBLEVEL *= *//p' "$SRC/Makefile")"
+  [ -n "$sub" ] && [ "$sub" != "0" ] && ver="$ver.$sub"
+  echo "KERNEL_MAKE_VERSION=$ver" >> "${GITHUB_ENV:-/dev/null}"
+  log "Kernel version: $ver"
 }
 
 spoof_version() {
@@ -93,10 +101,7 @@ spoof_integrity() {
   is_on "$SPOOF_INTEGRITY" || return 0
   log "Applying integrity spoof patch"
   cd "$SRC"
-  curl -Lso spoof-integrity.patch \
-    "https://raw.githubusercontent.com/ShiningAsStar/extra_kernel_stuff/main/patches/spoof-kernel-integrity.patch"
-  patch -p1 --forward < spoof-integrity.patch || true
-  rm -f spoof-integrity.patch
+  apply_patch "$(json '.patches.spoofIntegrity')"
 }
 
 setup_toolchain() {
@@ -112,16 +117,13 @@ setup_toolchain() {
     local clang_ver
     clang_ver="$(curl -s "https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+/refs/heads/main/?format=JSON" | sed '1d' | jq -r '.entries[].name' | grep -E '^clang-r[0-9]+' | head -n1 || true)"
     [ -z "$clang_ver" ] && clang_ver="$(json '.toolchain.aosp.version')"
-    echo "Using: $clang_ver"
+    log "Using $clang_ver"
     local clang_dir="prebuilts/clang/host/linux-x86/$clang_ver"
     mkdir -p "$clang_dir"
     aria2c -x16 -s16 -j16 -o clang.tar.gz "https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/main/${clang_ver}.tar.gz"
     tar -xzf clang.tar.gz -C "$clang_dir" --strip-components=1 2>/dev/null || tar -xzf clang.tar.gz -C "$clang_dir"
     rm -f clang.tar.gz
-    rm -rf prebuilts/clang/host/linux-x86/clang-3289846 \
-           prebuilts/clang/host/linux-x86/clang-r450784e \
-           prebuilts/clang/host/linux-x86/clang-r547379 \
-           prebuilts/clang/host/linux-x86/clang-stable
+    find prebuilts/clang/host/linux-x86 -maxdepth 1 -type d ! -name host ! -name "$clang_ver" -exec rm -rf {} +
     sed -i -e 's/^BRANCH=.*/BRANCH=android13-5.15/' \
       -e "s/^CLANG_VERSION=.*/CLANG_VERSION=$clang_ver/" \
       "$kd/build.config.constants"
@@ -130,7 +132,7 @@ setup_toolchain() {
     local url
     url="$(curl -sL "$(json '.toolchain.zycromerz.releaseApi')" | jq -r '.assets[] | select(.name | endswith(".tar.gz")) | .browser_download_url' | head -n1 || true)"
     [ -z "$url" ] && url="$(json '.toolchain.zycromerz.fallbackUrl')"
-    echo "Using: $url"
+    log "Using $(basename "$url")"
     mkdir -p clang
     aria2c -x16 -s16 -j16 -o clang.tar.gz "$url"
     tar -C clang -zxf clang.tar.gz && rm clang.tar.gz
@@ -171,93 +173,75 @@ configure_defconfig() {
     printf 'CONFIG_LTO_CLANG=y\nCONFIG_LTO_CLANG_FULL=y\n' >> "$cfg"
   fi
 
+  if is_on "$SYSTEM_DLKM"; then
+    log "system_dlkm enabled, switching zram/zsmalloc to modules"
+    sed -i '/^CONFIG_ZRAM=/d; /^CONFIG_ZSMALLOC=/d; /^# CONFIG_ZRAM is not set/d; /^# CONFIG_ZSMALLOC is not set/d' "$cfg"
+    printf 'CONFIG_ZRAM=m\nCONFIG_ZSMALLOC=m\nCONFIG_MODULE_UNLOAD=y\nCONFIG_MODULES=y\n' >> "$cfg"
+  fi
+
   json '.defconfigExtras[]' >> "$cfg"
 }
 
 patch_extras() {
   cd "$SRC"
   if is_on "$BBG"; then
-    log "Baseband-guard"
+    log "Applying Baseband Guard"
     wget -qO- "$(json '.patches.basebandGuard')" | bash
     echo "CONFIG_BBG=y" >> "arch/arm64/configs/$DEFCONFIG_NAME"
     sed -i '/^config LSM$/,/^help$/{ /^[[:space:]]*default/{ /baseband_guard/! s/selinux/selinux,baseband_guard/; }; }' security/Kconfig
   fi
   if is_on "$DROIDSPACES"; then
-    log "Droidspaces"
+    log "Applying Droidspaces"
     curl -sL "$(json '.patches.droidspaces')" | git apply -v --ignore-whitespace
   fi
 }
 
 setup_ksu() {
   [ "$VARIANT" = "Vanilla" ] && { log "Vanilla build, skipping KSU"; return 0; }
-  log "Setting up $VARIANT (robust checkout)"
+  log "Setting up $VARIANT"
 
   cd "$SRC"
-  rm -rf KernelSU-Workspace KernelSU KernelSU-Next drivers/kernelsu
-
-  local setup_url setup_arg dir ksurepo ksu_input
+  rm -rf KernelSU KernelSU-Next drivers/kernelsu KernelSU-Workspace
+  local setup_url setup_arg dir ksurepo ksu_ref
   setup_url="$(json ".variants.\"$VARIANT\".ksu.setupUrl")"
   setup_arg="$(json ".variants.\"$VARIANT\".ksu.setupArg")"
   dir="$(json ".variants.\"$VARIANT\".ksu.dir")"
+  ksurepo="$(echo "$setup_url" | sed -E 's|.*github.com[:/]+([^/]+/[^/]+)(\.git)?$|\1|')"
+  ksu_ref="${setup_arg:-main}"
 
-  if echo "$setup_url" | grep -qE 'github.com/.+/.+(\.git)?'; then
-    ksurepo="$(echo "$setup_url" | sed -E 's|.*github.com[:/]+([^/]+/[^/]+)(\.git)?$|\1|')"
-    ksu_input="${setup_arg:-dev-susfs}"
-    mkdir -p KernelSU-Workspace
-    cd KernelSU-Workspace
-
-    retry() { local n=0; until [ "$n" -ge 5 ]; do "$@" && return 0; n=$((n+1)); sleep 5; done; return 1; }
-
-    if git ls-remote --heads "https://github.com/$ksurepo.git" "$ksu_input" | grep -q .; then
-      rm -rf KernelSU-Repo
-      retry git clone --depth=50 --single-branch --branch "$ksu_input" "https://github.com/$ksurepo.git" KernelSU-Repo
-    else
-      rm -rf KernelSU-Repo
-      git clone --depth=50 "https://github.com/$ksurepo.git" KernelSU-Repo
-      (cd KernelSU-Repo && git fetch --depth=50 origin "$ksu_input" || true)
-      (cd KernelSU-Repo && git checkout --detach "$ksu_input" || true)
-    fi
-
-    if [ -d KernelSU-Repo ]; then
-      cd KernelSU-Repo || return 0
-      if [ -f kernel/setup.sh ]; then
-        bash kernel/setup.sh "$setup_arg" || true
-      elif [ -f setup.sh ]; then
-        bash setup.sh "$setup_arg" || true
-      else
-        cd "$WORK_DIR"
-        curl -LSs "$setup_url" | bash -s "$setup_arg" || true
-      fi
-
-      BASE_BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null | sed 's:-.*::' || true)
-      BASE_COMMIT=$(git merge-base HEAD refs/remotes/origin/$BASE_BRANCH 2>/dev/null || git merge-base HEAD refs/remotes/origin/main 2>/dev/null || echo HEAD)
-      COMMITS_COUNT=$(git rev-list --count "$BASE_COMMIT" 2>/dev/null || echo 0)
-      BASE_VERSION=30000
-      KSU_VERSION=$((BASE_VERSION + COMMITS_COUNT))
-      KSU_COMMIT=$(git rev-parse --short HEAD 2>/dev/null || true)
-      KSU_GIT_TAG=$(git describe --tags --abbrev=0 "$BASE_COMMIT" 2>/dev/null || echo "")
-
-      if [ -f "$SRC/$dir/Kbuild" ]; then
-        sed -i "s/^KSU_VERSION_FALLBACK := .*/KSU_VERSION_FALLBACK := ${KSU_VERSION}/" "$SRC/$dir/Kbuild" 2>/dev/null || true
-      fi
-
-      KSUVER="${KSU_COMMIT:-$KSU_VERSION}"
-      echo "KSUVER=$KSUVER" >> "${GITHUB_ENV:-/dev/null}"
-      echo "KSU_COMMIT=$KSU_COMMIT" >> "${GITHUB_ENV:-/dev/null}"
-      echo "KSU_VERSION=$KSU_VERSION" >> "${GITHUB_ENV:-/dev/null}"
-      echo "KSU_GIT_TAG=$KSU_GIT_TAG" >> "${GITHUB_ENV:-/dev/null}"
-
-      if [ -d kernel ]; then
-        mv -f kernel "$SRC/$dir" 2>/dev/null || true
-      fi
-    fi
+  log "Cloning $ksurepo @ $ksu_ref"
+  if git ls-remote --heads "https://github.com/$ksurepo.git" "$ksu_ref" | grep -q .; then
+    git clone --depth=64 --single-branch --branch "$ksu_ref" "https://github.com/$ksurepo.git" /tmp/ksu-src
   else
-    log "Falling back to remote setup script"
-    curl -LSs "$setup_url" | bash -s "$setup_arg"
-    local ksu_dir="$SRC/$dir"
-    KSUVER="$(git -C "$ksu_dir" describe --tags --abbrev=0 2>/dev/null || git -C "$ksu_dir" rev-parse --short=8 HEAD)"
-    echo "KSUVER=$KSUVER" >> "${GITHUB_ENV:-/dev/null}"
+    git clone --depth=64 "https://github.com/$ksurepo.git" /tmp/ksu-src
+    git -C /tmp/ksu-src fetch --depth=64 origin "$ksu_ref"
+    git -C /tmp/ksu-src checkout --detach FETCH_HEAD
   fi
+  log "Linking KSU into kernel tree via setup script"
+  bash /tmp/ksu-src/kernel/setup.sh "$ksu_ref" || bash /tmp/ksu-src/setup.sh "$ksu_ref"
+
+  local commits ksu_version ksu_commit ksu_tag
+  commits=$(git -C /tmp/ksu-src rev-list --count HEAD)
+  ksu_version=$((30000 + commits))
+  ksu_commit=$(git -C /tmp/ksu-src rev-parse --short HEAD)
+  ksu_tag=$(git -C /tmp/ksu-src describe --tags --abbrev=0 2>/dev/null || echo "unknown")
+
+  if [ -f "$SRC/$dir/Kbuild" ]; then
+    sed -i "s/^KSU_VERSION_FALLBACK := .*/KSU_VERSION_FALLBACK := ${ksu_version}/" "$SRC/$dir/Kbuild" || true
+    if [ -n "$LOCAL_VERSION" ]; then
+      sed -i "s|\(-DKSU_VERSION_FULL=[^\"]*\)\"|\1${LOCAL_VERSION}\"|" "$SRC/$dir/Kbuild" || true
+      log "KSU version name suffix: ${LOCAL_VERSION}"
+    fi
+  fi
+  {
+    echo "KSUVER=${ksu_tag}-${ksu_commit}"
+    echo "KSU_COMMIT=$ksu_commit"
+    echo "KSU_VERSION=$ksu_version"
+    echo "KSU_GIT_TAG=$ksu_tag"
+  } >> "${GITHUB_ENV:-/dev/null}"
+
+  rm -rf /tmp/ksu-src
+  log "KSU ready: $VARIANT ($ksu_tag @ $ksu_commit, version $ksu_version)"
 }
 
 setup_susfs() {
@@ -331,7 +315,7 @@ compile() {
 find_dist() {
   DIST_DIR="$(find "$WORK_DIR/out" -maxdepth 3 -type d -name dist 2>/dev/null | head -n1)"
   [ -z "$DIST_DIR" ] && DIST_DIR="$WORK_DIR/out/dist"
-  echo "dist dir: $DIST_DIR"
+  log "Dist dir: $DIST_DIR"
 }
 
 apply_kpm() {
@@ -341,67 +325,24 @@ apply_kpm() {
   local url
   url="$(curl -sL "$(json '.patches.kpmApi')" | jq -r '.assets[] | select(.name == "patch_linux") | .browser_download_url' | head -n1 || true)"
   [ -z "$url" ] && url="$(json '.patches.kpmFallback')"
-  echo "Using: $url"
+  log "Using $(basename "$url")"
   curl -fL -s -o patch_linux "$url"
   chmod +x patch_linux && ./patch_linux
   [ -f oImage ] && mv -f oImage Image
 }
 
-pack_erofs() {
-  [ "$SYSTEM_DLKM_EROFS" = "true" ] || return 0
-  log "Packing system_dlkm as EROFS"
-  cd "$DIST_DIR"
-  [ -f Image ] || die "Kernel image missing"
-
-  local staging="system_dlkm_staging"
-  rm -rf "$staging" system_dlkm.img
-
-  local existing
-  existing="$(find "$WORK_DIR/out" -maxdepth 4 -name "system_dlkm.img" 2>/dev/null | head -n1)"
-  if [ -n "$existing" ]; then
-    log "Reusing system_dlkm.img from build output: $existing"
-    cp -f "$existing" ./system_dlkm.img
+pack_system_dlkm() {
+  is_on "$SYSTEM_DLKM" || return 0
+  log "Collecting system_dlkm"
+  local img
+  img="$(find "$WORK_DIR/out" -maxdepth 4 -name "system_dlkm.img" -type f 2>/dev/null | head -n1)"
+  if [ -z "$img" ]; then
+    echo "::warning::system_dlkm.img not found in build output, it will not be included"
     return 0
   fi
-
-  log "No prebuilt system_dlkm.img found, collecting zram/zsmalloc modules"
-  local mod_root
-  mod_root="$(find "$WORK_DIR/out" -maxdepth 5 -type d -path "*staging/lib/modules" 2>/dev/null | head -n1)"
-  if [ -z "$mod_root" ]; then
-    echo "::warning::no modules staging dir found, skipping EROFS pack"
-    return 0
-  fi
-
-  local ko rel dest deps dep_ko
-  for ko in $(find "$mod_root" \( -name "zram.ko" -o -name "zsmalloc.ko" \) 2>/dev/null); do
-    rel="${ko#$mod_root/}"
-    dest="$staging/lib/modules/$rel"
-    mkdir -p "$(dirname "$dest")"
-    cp -f "$ko" "$dest"
-    echo "packed: lib/modules/$rel"
-  done
-
-  [ -f "$staging/lib/modules/kernel/drivers/block/zram/zram.ko" ] || echo "::warning::zram.ko missing from build output"
-  [ -f "$staging/lib/modules/kernel/mm/zsmalloc.ko" ] || echo "::warning::zsmalloc.ko missing from build output"
-
-  deps="$(modinfo -F depends "$staging/lib/modules/kernel/drivers/block/zram/zram.ko" 2>/dev/null || true)"
-  for dep in ${deps//,/ }; do
-    dep_ko="$(find "$mod_root" -name "${dep}.ko" | head -n1)"
-    if [ -n "$dep_ko" ]; then
-      rel="${dep_ko#$mod_root/}"
-      dest="$staging/lib/modules/$rel"
-      mkdir -p "$(dirname "$dest")"
-      cp -f "$dep_ko" "$dest"
-      echo "packed dependency: lib/modules/$rel"
-    else
-      echo "::warning::dependency ${dep}.ko not found"
-    fi
-  done
-
-  mkfs.erofs -z lz4hc,9 -T 1230768000 system_dlkm.img "$staging" 2>/dev/null || \
-    mkfs.erofs -z lz4hc system_dlkm.img "$staging"
-  rm -rf "$staging"
-  ls -la system_dlkm.img
+  mkdir -p "$WORK_DIR/dlkm_out"
+  cp -f "$img" "$WORK_DIR/dlkm_out/system_dlkm.img"
+  ls -la "$WORK_DIR/dlkm_out/system_dlkm.img"
 }
 
 package_ak3() {
@@ -410,14 +351,17 @@ package_ak3() {
   [ -f Image ] || die "Kernel image missing"
 
   cd "$WORK_DIR"
-  git clone --depth=1 "$(json '.repo.anyKernel3')" -b master AK3_Workspace
+  git clone --depth=1 "$(json '.repo.anyKernel3')" AK3_Workspace
   rm -rf AK3_Workspace/.git
 
-  local img_name
-  img_name="$(json ".variants.\"$VARIANT\".image")"
-  cp "$DIST_DIR/Image" "AK3_Workspace/$img_name"
+  cp "$DIST_DIR/Image" "AK3_Workspace/Image.${VARIANT}"
 
-  [ -f "$DIST_DIR/system_dlkm.img" ] && cp "$DIST_DIR/system_dlkm.img" AK3_Workspace/system_dlkm.img
+  if is_on "$SYSTEM_DLKM" && [ -f "$WORK_DIR/dlkm_out/system_dlkm.img" ]; then
+    cp "$WORK_DIR/dlkm_out/system_dlkm.img" AK3_Workspace/system_dlkm.img
+    log "Including system_dlkm.img in zip"
+  else
+    log "system_dlkm disabled or missing, not included in zip"
+  fi
 
   local build_time zip_name
   build_time="$(date +'%Y-%m-%d')"
@@ -425,7 +369,8 @@ package_ak3() {
   echo "ZIP_NAME=$zip_name" >> "${GITHUB_ENV:-/dev/null}"
   echo "AK3_DIR=$WORK_DIR/AK3_Workspace" >> "${GITHUB_ENV:-/dev/null}"
   echo "ZIP_PATH=$WORK_DIR/AK3_Workspace" >> "${GITHUB_ENV:-/dev/null}"
-  echo "Done: $zip_name"
+  echo "SYSTEM_DLKM_PACKED=$(is_on "$SYSTEM_DLKM" && echo true || echo false)" >> "${GITHUB_ENV:-/dev/null}"
+  log "Done: $zip_name"
 }
 
 prepare_env
@@ -443,5 +388,5 @@ configure_ksu_defconfig
 compile
 find_dist
 apply_kpm
-pack_erofs
+pack_system_dlkm
 package_ak3
