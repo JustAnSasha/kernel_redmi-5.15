@@ -118,57 +118,48 @@
       "label": "Vanilla",
       "ksu": null,
       "llvm": false,
-      "kpm": false,
-      "image": "Image.Vanilla"
+      "kpm": false
     },
     "KernelSU": {
       "label": "KernelSU",
       "ksu": {
-        "setupArg": "",
         "dir": "KernelSU",
-        "type": "kernelsu",
-        "setupUrl": "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh"
+        "repo": "tiann/KernelSU",
+        "ref": "main"
       },
       "llvm": false,
-      "kpm": false,
-      "image": "Image.KernelSU"
+      "kpm": false
     },
     "KernelSU-Next": {
       "label": "KernelSU-Next",
       "ksu": {
         "dir": "KernelSU-Next",
-        "type": "kernelsu-next",
-        "setupArg": "dev",
-        "setupUrl": "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/dev/kernel/setup.sh"
+        "repo": "KernelSU-Next/KernelSU-Next",
+        "ref": "dev"
       },
       "llvm": false,
-      "kpm": false,
-      "image": "Image.KernelSU-Next"
+      "kpm": false
     },
     "ReSukiSU": {
       "label": "ReSukiSU",
       "llvm": true,
       "kpm": true,
-      "image": "Image.ReSukiSU",
       "packSystemDlkm": true,
       "ksu": {
         "dir": "KernelSU",
-        "setupUrl": "https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/main/kernel/setup.sh",
-        "type": "resukisu",
-        "setupArg": "main"
+        "repo": "ReSukiSU/ReSukiSU",
+        "ref": "main"
       }
     },
     "SukiSU-Ultra": {
       "label": "SukiSU-Ultra",
       "ksu": {
-        "setupArg": "builtin",
         "dir": "KernelSU",
-        "type": "sukisu-ultra",
-        "setupUrl": "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/builtin/kernel/setup.sh"
+        "repo": "SukiSU-Ultra/SukiSU-Ultra",
+        "ref": "builtin"
       },
       "llvm": false,
-      "kpm": true,
-      "image": "Image.SukiSU-Ultra"
+      "kpm": true
     }
   }
 }

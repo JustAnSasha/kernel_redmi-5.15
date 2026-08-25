@@ -131,7 +131,7 @@ concurrency:
 
 jobs:
   build:
-    name: ${{ inputs.variant }} @ ${{ inputs.kernelBranch }}
+    name: ${{ inputs.variant }} Kernel
     runs-on: ubuntu-latest
     steps:
       - name: Checkout

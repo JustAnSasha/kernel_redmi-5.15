@@ -45,9 +45,14 @@ apply_patch() {
 
 prepare_env() {
   log "Preparing environment"
-  mkdir -p "$kernelDir"
+  mkdir -p "$kernelDir" ~/.local/bin
   sudo apt-get update -qq
-  sudo apt-get install -y repo rsync aria2 jq zip ccache binutils lld gcc-aarch64-linux-gnu
+  sudo apt-get install -y -qq aria2 ccache binutils jq zip >/dev/null
+  if [ ! -x "$HOME/.local/bin/repo" ]; then
+    curl -s https://storage.googleapis.com/git-repo-downloads/repo > ~/.local/bin/repo
+    chmod +x ~/.local/bin/repo
+  fi
+  export PATH="$HOME/.local/bin:$PATH"
 }
 
 free_space() {
@@ -120,7 +125,7 @@ setup_toolchain() {
     log "Using $clang_ver"
     local clang_dir="prebuilts/clang/host/linux-x86/$clang_ver"
     mkdir -p "$clang_dir"
-    aria2c -x16 -s16 -j16 -o clang.tar.gz "https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/main/${clang_ver}.tar.gz"
+    aria2c -x16 -s16 -j16 --console-log-level=warn --summary-interval=0 -o clang.tar.gz "https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/main/${clang_ver}.tar.gz"
     tar -xzf clang.tar.gz -C "$clang_dir" --strip-components=1 2>/dev/null || tar -xzf clang.tar.gz -C "$clang_dir"
     rm -f clang.tar.gz
     find prebuilts/clang/host/linux-x86 -maxdepth 1 -type d ! -name host ! -name "$clang_ver" -exec rm -rf {} +
@@ -134,7 +139,7 @@ setup_toolchain() {
     [ -z "$url" ] && url="$(json '.toolchain.zycromerz.fallbackUrl')"
     log "Using $(basename "$url")"
     mkdir -p clang
-    aria2c -x16 -s16 -j16 -o clang.tar.gz "$url"
+    aria2c -x16 -s16 -j16 --console-log-level=warn --summary-interval=0 -o clang.tar.gz "$url"
     tar -C clang -zxf clang.tar.gz && rm clang.tar.gz
     export CLANG_PATH="$WORK_DIR/clang"
   fi
@@ -201,24 +206,17 @@ setup_ksu() {
   log "Setting up $VARIANT"
 
   cd "$SRC"
-  rm -rf KernelSU KernelSU-Next drivers/kernelsu KernelSU-Workspace
-  local setup_url setup_arg dir ksurepo ksu_ref
-  setup_url="$(json ".variants.\"$VARIANT\".ksu.setupUrl")"
-  setup_arg="$(json ".variants.\"$VARIANT\".ksu.setupArg")"
+  rm -rf KernelSU KernelSU-Next drivers/kernelsu
+  local dir ksu_repo ksu_ref
   dir="$(json ".variants.\"$VARIANT\".ksu.dir")"
-  ksurepo="$(echo "$setup_url" | sed -E 's|.*github.com[:/]+([^/]+/[^/]+)(\.git)?$|\1|')"
-  ksu_ref="${setup_arg:-main}"
+  ksu_repo="$(json ".variants.\"$VARIANT\".ksu.repo")"
+  ksu_ref="$(json ".variants.\"$VARIANT\".ksu.ref")"
 
-  log "Cloning $ksurepo @ $ksu_ref"
-  if git ls-remote --heads "https://github.com/$ksurepo.git" "$ksu_ref" | grep -q .; then
-    git clone --depth=64 --single-branch --branch "$ksu_ref" "https://github.com/$ksurepo.git" /tmp/ksu-src
-  else
-    git clone --depth=64 "https://github.com/$ksurepo.git" /tmp/ksu-src
-    git -C /tmp/ksu-src fetch --depth=64 origin "$ksu_ref"
-    git -C /tmp/ksu-src checkout --detach FETCH_HEAD
-  fi
-  log "Linking KSU into kernel tree via setup script"
-  bash /tmp/ksu-src/kernel/setup.sh "$ksu_ref" || bash /tmp/ksu-src/setup.sh "$ksu_ref"
+  log "Cloning $ksu_repo @ $ksu_ref"
+  git clone --depth=64 "https://github.com/$ksu_repo.git" -b "$ksu_ref" /tmp/ksu-src
+  local setup_script="/tmp/ksu-src/kernel/setup.sh"
+  [ -f "$setup_script" ] || setup_script="/tmp/ksu-src/setup.sh"
+  bash "$setup_script" "$ksu_ref"
 
   local commits ksu_version ksu_commit ksu_tag
   commits=$(git -C /tmp/ksu-src rev-list --count HEAD)
