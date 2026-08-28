@@ -22,8 +22,8 @@ jobs:
             echo "::error::PAT_TOKEN secret is not set"
             exit 1
           fi
-          gh run list --limit 1000 --json databaseId --jq '.[].databaseId' | tail -n +$(( ${{ inputs.keep }} + 1 )) | while read -r id; do
-            gh run delete "$id" || true
+          gh run list -R "$GITHUB_REPOSITORY" --limit 1000 --json databaseId --jq '.[].databaseId' | tail -n +$(( ${{ inputs.keep }} + 1 )) | while read -r id; do
+            gh run delete -R "$GITHUB_REPOSITORY" "$id" || true
           done
         env:
           GH_TOKEN: ${{ secrets.PAT_TOKEN }}

@@ -16,8 +16,8 @@ jobs:
             echo "::error::PAT_TOKEN secret is not set"
             exit 1
           fi
-          gh cache list --json id --limit 100 --jq '.[].id' | while read -r id; do
-            gh cache delete "$id" || true
+          gh cache list -R "$GITHUB_REPOSITORY" --json id --limit 100 --jq '.[].id' | while read -r id; do
+            gh cache delete -R "$GITHUB_REPOSITORY" "$id" || true
           done
         env:
           GH_TOKEN: ${{ secrets.PAT_TOKEN }}
