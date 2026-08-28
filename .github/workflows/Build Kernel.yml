@@ -178,8 +178,9 @@ jobs:
           is_on() { [[ "$1" == "on" || "$1" == "true" ]]; }
 
           DEFCONFIG_NAME="${KERNEL_DEVICE}_defconfig"
-          SRC="$PWD/common_${KERNEL_DEVICE}/common"
-          DIST_DIR="$PWD/out/dist"
+          ROOT="$PWD"
+          SRC="$ROOT/common_${KERNEL_DEVICE}/common"
+          DIST_DIR="$ROOT/out/dist"
 
           log "Preparing environment"
           sudo apt-get update -qq
@@ -233,13 +234,13 @@ jobs:
           fi
 
           log "Syncing build tools"
-          cd "$PWD"
+          cd "$ROOT"
           repo init -u https://android.googlesource.com/kernel/manifest -b "$ANDROID_BRANCH" --depth=1
           repo sync -c --optimized-fetch --prune --no-clone-bundle --no-tags --force-sync --fail-fast -j"$(nproc)"
 
           if [ "$CLANG_VERSION" = "AOSP" ]; then
             log "Fetching latest AOSP clang"
-            cd "$PWD"
+            cd "$ROOT"
             CLANG_TAG="$(curl -s "https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+/refs/heads/main/?format=JSON" | sed '1d' | jq -r '.entries[].name' | grep -E '^clang-r[0-9]+' | head -n1 || true)"
             [ -z "$CLANG_TAG" ] && CLANG_TAG="clang-r547379"
             log "Using $CLANG_TAG"
@@ -253,7 +254,7 @@ jobs:
             sed -i -e 's/^BRANCH=.*/BRANCH=android13-5.15/' -e "s/^CLANG_VERSION=.*/CLANG_VERSION=$CLANG_TAG/" "$SRC/build.config.constants"
           else
             log "Fetching latest ZyCromerZ clang"
-            cd "$PWD"
+            cd "$ROOT"
             URL="$(curl -sL "https://api.github.com/repos/ZyCromerZ/Clang/releases/latest" | jq -r '.assets[] | select(.name | endswith(".tar.gz")) | .browser_download_url' | head -n1 || true)"
             [ -z "$URL" ] && URL="https://github.com/ZyCromerZ/Clang/releases/download/16.0.6-20260807-release/Clang-16.0.6-20260807.tar.gz"
             log "Using $(basename "$URL")"
@@ -345,7 +346,7 @@ jobs:
             log "Applying Baseband Guard"
             wget -qO- "https://github.com/vc-teahouse/Baseband-guard/raw/main/setup.sh" | bash
             echo "CONFIG_BBG=y" >> "$CFGF"
-            sed -i '/^config LSM$/,/^help$/{ /^[[:space:]]*default/{ /baseband_guard/! s/selinux/selinux,baseband_guard/; }; }' security/Kconfig
+            echo 'CONFIG_LSM=landlock,lockdown,yama,loadpin,safesetid,integrity,selinux,smack,tomoyo,apparmor,bpf,baseband_guard' >> "$CFGF"
           fi
           if is_on "$DROIDSPACES"; then
             log "Applying Droidspaces"
@@ -440,7 +441,7 @@ jobs:
           fi
 
           log "Compiling kernel"
-          cd "$PWD"
+          cd "$ROOT"
           export CCACHE=1
           export CCACHE_DIR="$PWD/.ccache"
           EXTRA=""
@@ -474,7 +475,7 @@ jobs:
           fi
 
           log "Packaging AnyKernel3"
-          cd "$PWD"
+          cd "$ROOT"
           git clone --depth=1 "$AK3_URL" AK3
           rm -rf AK3/.git
           cp "$DIST_DIR/Image" "AK3/Image.${VARIANT}"
@@ -482,9 +483,80 @@ jobs:
           ZIP_NAME="${VARIANT}_AK3_${KERNEL_BRANCH}_$(date +'%Y-%m-%d')"
           cd AK3
           zip -r9 "../${ZIP_NAME}.zip" . -x ".git*" > /dev/null
-          cd ..
+          cd "$ROOT"
           echo "ZIP_NAME=${ZIP_NAME}.zip" >> "$GITHUB_ENV"
           log "Done: ${ZIP_NAME}.zip"
+
+      - name: Telegram notify
+        if: always()
+        run: |
+          if [ -z "$TELEGRAM_TOKEN" ] || [ -z "$TELEGRAM_CHAT" ]; then
+            echo "Telegram secrets not set, skipping"
+            exit 0
+          fi
+          python3 << 'PYEOF'
+          import json, os, urllib.parse, urllib.request, uuid
+
+          token = os.environ["TELEGRAM_TOKEN"]
+          chat = os.environ["TELEGRAM_CHAT"]
+          status = os.environ["BUILD_STATUS"]
+
+          def api(method, data=None, files=None):
+              url = f"https://api.telegram.org/bot{token}/{method}"
+              if files:
+                  boundary = uuid.uuid4().hex
+                  body = b""
+                  for key, value in data.items():
+                      body += f"--{boundary}\r\nContent-Disposition: form-data; name='{key}'\r\n\r\n{value}\r\n".encode()
+                  for key, filename, path in files:
+                      with open(path, "rb") as fh:
+                          payload = fh.read()
+                      body += f"--{boundary}\r\nContent-Disposition: form-data; name='{key}'; filename='{filename}'\r\nContent-Type: application/octet-stream\r\n\r\n".encode()
+                      body += payload + b"\r\n"
+                  body += f"--{boundary}--\r\n".encode()
+                  request = urllib.request.Request(url, body, {"Content-Type": f"multipart/form-data; boundary={boundary}"})
+              else:
+                  request = urllib.request.Request(url, urllib.parse.urlencode(data).encode())
+              try:
+                  with urllib.request.urlopen(request, timeout=60) as response:
+                      return json.load(response)
+              except Exception as error:
+                  print(f"telegram {method} failed: {error}")
+
+          icon = "✅" if status == "success" else "❌"
+          text = (
+              f"{icon} <b>Shining Kernel</b>\n"
+              f"<b>Status:</b> {status}\n"
+              f"<b>Variant:</b> {os.environ['VARIANT']}\n"
+              f"<b>Branch:</b> {os.environ['KERNEL_BRANCH']}\n"
+              f"<b>Kernel:</b> {os.environ.get('KERNEL_VERSION', '?')}\n"
+          )
+          if os.environ.get("KSU_VER"):
+              text += f"<b>KSU:</b> {os.environ['KSU_VER']}\n"
+          if os.environ.get("KERNEL_SPOOF_VERSION"):
+              text += f"<b>Spoof:</b> {os.environ['KERNEL_SPOOF_VERSION']}{os.environ.get('LOCAL_VERSION', '')}\n"
+          text += f"<b>Clang:</b> {os.environ.get('CLANG_VERSION', '?')} | LTO: {os.environ.get('LTO_TYPE', '?')} | {os.environ.get('OPT_LEVEL', '?')}\n"
+          if status == "success":
+              text += "<b>Zip:</b> attached\n"
+          text += f"<a href='{os.environ['RUN_URL']}'>Build log</a>"
+
+          data = {"chat_id": chat, "caption": text, "parse_mode": "HTML"}
+          zip_path = os.environ.get("ZIP_NAME", "")
+          if status == "success" and zip_path and os.path.isfile(zip_path):
+              if os.path.getsize(zip_path) <= 50 * 1024 * 1024:
+                  api("sendDocument", data, files=[("document", zip_path, zip_path)])
+              else:
+                  text += "\n⚠️ Zip too large for Telegram, grab it from artifacts"
+                  data["caption"] = text
+                  api("sendMessage", {"chat_id": chat, "text": text, "parse_mode": "HTML"})
+          else:
+              api("sendMessage", {"chat_id": chat, "text": text, "parse_mode": "HTML"})
+          PYEOF
+        env:
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT: ${{ secrets.TELEGRAM_USER_ID }}
+          BUILD_STATUS: ${{ job.status }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
 
       - name: ccache stats
         if: always()
