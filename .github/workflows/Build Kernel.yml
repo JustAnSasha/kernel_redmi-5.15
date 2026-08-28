@@ -15,25 +15,25 @@ on:
           - ReSukiSU
           - SukiSU-Ultra
       kernelBranch:
-        description: Kernel branch (shining-oplus = OxygenOS/ColorOS ports)
+        description: Kernel branch
         required: true
         type: choice
         default: shining
         options:
           - shining
-          - shining-oplus
+          - google
       kernelDevice:
         description: Defconfig name
         required: false
         type: string
         default: gki
       kernelSpoofVersion:
-        description: Spoofed kernel version (empty = stock)
+        description: Spoofed kernel version
         required: false
         type: string
         default: ""
       localVersion:
-        description: Local version suffix (empty = none)
+        description: Local version suffix
         required: false
         type: string
         default: ""
@@ -63,7 +63,7 @@ on:
         description: Tick rate
         required: false
         type: choice
-        default: "250"
+        default: "300"
         options:
           - default
           - "100"
@@ -83,7 +83,7 @@ on:
         description: Baseband guard
         required: true
         type: choice
-        default: on
+        default: off
         options:
           - on
           - off
@@ -104,7 +104,7 @@ on:
           - on
           - off
       droidspaces:
-        description: Droidspaces fix
+        description: Droidspaces
         required: true
         type: choice
         default: off
@@ -131,7 +131,7 @@ env:
 
 jobs:
   build:
-    name: ${{ inputs.variant }} / ${{ inputs.kernelBranch }}
+    name: ${{ inputs.variant }} Build
     runs-on: ubuntu-latest
     env:
       VARIANT: ${{ inputs.variant }}

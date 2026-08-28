@@ -17,7 +17,7 @@ Built entirely from a single GitHub Actions workflow — no helper scripts, no l
 | Branch | Target |
 |---|---|
 | `shining` | All four devices, stock HyperOS/MIUI ROMs |
-| `shining-oplus` | Same devices with OnePlus drivers, for OxygenOS 16 / ColorOS 16 ports |
+| `google` | Just stock google android 5.15-lts |
 
 ## Variants
 
