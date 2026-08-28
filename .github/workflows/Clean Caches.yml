@@ -1,0 +1,23 @@
+name: Clean Caches
+
+on:
+  workflow_dispatch:
+
+permissions:
+  actions: write
+
+jobs:
+  clean:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Delete all caches
+        run: |
+          if [ -z "${{ secrets.PAT_TOKEN }}" ]; then
+            echo "::error::PAT_TOKEN secret is not set"
+            exit 1
+          fi
+          gh cache list --json id --limit 100 --jq '.[].id' | while read -r id; do
+            gh cache delete "$id" || true
+          done
+        env:
+          GH_TOKEN: ${{ secrets.PAT_TOKEN }}
