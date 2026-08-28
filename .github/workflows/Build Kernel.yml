@@ -345,7 +345,9 @@ jobs:
           if is_on "$BBG"; then
             log "Applying Baseband Guard"
             wget -qO- "https://github.com/vc-teahouse/Baseband-guard/raw/main/setup.sh" | bash
+            sed -i '/^config LSM$/,/^help$/{ /^[[:space:]]*default/ { /baseband_guard/! s/selinux/selinux,baseband_guard/ } }' security/Kconfig
             echo "CONFIG_BBG=y" >> "$CFGF"
+            sed -i '/^CONFIG_LSM=/d' "$CFGF"
             echo 'CONFIG_LSM=landlock,lockdown,yama,loadpin,safesetid,integrity,selinux,smack,tomoyo,apparmor,bpf,baseband_guard' >> "$CFGF"
           fi
           if is_on "$DROIDSPACES"; then
