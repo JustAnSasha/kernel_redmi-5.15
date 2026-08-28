@@ -2,6 +2,12 @@ name: Clean Workflows
 
 on:
   workflow_dispatch:
+    inputs:
+      keep:
+        description: Number of latest runs to keep
+        required: false
+        type: number
+        default: 10
 
 permissions:
   actions: write
@@ -16,7 +22,7 @@ jobs:
             echo "::error::PAT_TOKEN secret is not set"
             exit 1
           fi
-          gh run list --limit 1000 --json databaseId --jq '.[].databaseId' | tail -n +11 | while read -r id; do
+          gh run list --limit 1000 --json databaseId --jq '.[].databaseId' | tail -n +$(( ${{ inputs.keep }} + 1 )) | while read -r id; do
             gh run delete "$id" || true
           done
         env:
