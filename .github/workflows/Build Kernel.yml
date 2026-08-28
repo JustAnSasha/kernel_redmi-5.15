@@ -14,13 +14,8 @@ on:
           - KernelSU-Next
           - ReSukiSU
           - SukiSU-Ultra
-      kernelSourceURL:
-        description: Kernel source URL
-        required: true
-        type: string
-        default: https://github.com/ShiningAsStar/kernel_redmi-5.15
       kernelBranch:
-        description: Kernel branch (shining-oplus = OnePlus drivers for OxygenOS/ColorOS 16 ports)
+        description: Kernel branch (shining-oplus = OxygenOS/ColorOS ports)
         required: true
         type: choice
         default: shining
@@ -28,22 +23,22 @@ on:
           - shining
           - shining-oplus
       kernelDevice:
-        description: Device defconfig
-        required: true
+        description: Defconfig name
+        required: false
         type: string
         default: gki
       kernelSpoofVersion:
-        description: Spoofed kernel version (leave empty for stock)
+        description: Spoofed kernel version (empty = stock)
         required: false
         type: string
         default: ""
       localVersion:
-        description: Local version suffix (leave empty for stock)
+        description: Local version suffix (empty = none)
         required: false
         type: string
         default: ""
-      SUSFS:
-        description: Enable SuSFS
+      enableSusfs:
+        description: SuSFS
         required: true
         type: boolean
         default: true
@@ -65,7 +60,7 @@ on:
           - ZyCromerZ
           - AOSP
       tickRate:
-        description: Kernel tick rate
+        description: Tick rate
         required: false
         type: choice
         default: "250"
@@ -76,6 +71,14 @@ on:
           - "300"
           - "500"
           - "1000"
+      ltoType:
+        description: LTO
+        required: true
+        type: choice
+        default: thin
+        options:
+          - thin
+          - full
       bbg:
         description: Baseband guard
         required: true
@@ -92,15 +95,7 @@ on:
         options:
           - on
           - off
-      LtoOptimizations:
-        description: LTO type
-        required: true
-        type: choice
-        default: thin
-        options:
-          - thin
-          - full
-      KPM:
+      kpm:
         description: Kernel Patch Module
         required: true
         type: choice
@@ -109,95 +104,396 @@ on:
           - on
           - off
       droidspaces:
-        description: Droidspaces support
+        description: Droidspaces fix
         required: true
         type: choice
         default: off
         options:
           - on
           - off
-      systemDlkm:
-        description: Include system_dlkm in the zip
-        required: true
-        type: boolean
-        default: false
 
 permissions:
   contents: read
 
 concurrency:
-  group: kernel-build
+  group: kernel-build-${{ inputs.kernelBranch }}
   cancel-in-progress: true
+
+env:
+  KERNEL_URL: https://github.com/ShiningAsStar/kernel_redmi-5.15
+  ANDROID_BRANCH: common-android13-5.15-lts
+  AK3_URL: https://github.com/ShiningAsStar/AnyKernel3
+  CCACHE_DIR: .ccache
+  CCACHE_COMPILERCHECK: content
+  CCACHE_COMPRESS: "1"
+  CCACHE_BASEDIR: ${{ github.workspace }}
+  CCACHE_MAXSIZE: 5G
 
 jobs:
   build:
-    name: ${{ inputs.variant }} Kernel
+    name: ${{ inputs.variant }} / ${{ inputs.kernelBranch }}
     runs-on: ubuntu-latest
+    env:
+      VARIANT: ${{ inputs.variant }}
+      KERNEL_BRANCH: ${{ inputs.kernelBranch }}
+      KERNEL_DEVICE: ${{ inputs.kernelDevice }}
+      KERNEL_SPOOF_VERSION: ${{ inputs.kernelSpoofVersion }}
+      LOCAL_VERSION: ${{ inputs.localVersion }}
+      ENABLE_SUSFS: ${{ inputs.enableSusfs }}
+      OPT_LEVEL: ${{ inputs.optimizationLevel }}
+      CLANG_VERSION: ${{ inputs.clangVersion }}
+      TICK_RATE: ${{ inputs.tickRate }}
+      LTO_TYPE: ${{ inputs.ltoType }}
+      BBG: ${{ inputs.bbg }}
+      SPOOF_INTEGRITY: ${{ inputs.spoofIntegrity }}
+      KPM: ${{ inputs.kpm }}
+      DROIDSPACES: ${{ inputs.droidspaces }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Ensure ccache dir
-        run: mkdir -p .ccache
+        uses: actions/checkout@v5
 
       - name: Restore ccache
         uses: actions/cache@v4
         with:
           path: .ccache
-          key: ccache-${{ inputs.variant }}-${{ inputs.kernelBranch }}-${{ github.run_id }}
+          key: ccache-${{ inputs.kernelBranch }}-${{ inputs.variant }}-${{ github.run_id }}
           restore-keys: |
-            ccache-${{ inputs.variant }}-${{ inputs.kernelBranch }}-
+            ccache-${{ inputs.kernelBranch }}-${{ inputs.variant }}-
+            ccache-${{ inputs.kernelBranch }}-
+
+      - name: Prune stale ccache
+        run: |
+          gh cache list --key ccache- --json id,key --limit 100 --jq '
+            .[] | select(.key != "ccache-${{ inputs.kernelBranch }}-${{ inputs.variant }}-${{ github.run_id }}") | .id
+          ' | while read -r id; do gh cache delete "$id" || true; done
+        env:
+          GH_TOKEN: ${{ github.token }}
 
       - name: Build
-        env:
-          VARIANT: ${{ inputs.variant }}
-          KERNEL_SOURCE_URL: ${{ inputs.kernelSourceURL }}
-          KERNEL_BRANCH: ${{ inputs.kernelBranch }}
-          KERNEL_DEVICE: ${{ inputs.kernelDevice }}
-          KERNEL_SPOOF_VERSION: ${{ inputs.kernelSpoofVersion }}
-          LOCAL_VERSION: ${{ inputs.localVersion }}
-          ENABLE_SUSFS: ${{ inputs.SUSFS }}
-          OPT_LEVEL: ${{ inputs.optimizationLevel }}
-          CLANG_VERSION: ${{ inputs.clangVersion }}
-          TICK_RATE: ${{ inputs.tickRate }}
-          BBG: ${{ inputs.bbg }}
-          SPOOF_INTEGRITY: ${{ inputs.spoofIntegrity }}
-          LTO_TYPE: ${{ inputs.LtoOptimizations }}
-          KPM: ${{ inputs.KPM }}
-          DROIDSPACES: ${{ inputs.droidspaces }}
-          SYSTEM_DLKM: ${{ inputs.systemDlkm }}
-        run: bash configuration/build.sh
+        run: |
+          set -euo pipefail
+
+          log() { echo -e "\033[1;35m==> $1\033[0m"; }
+          die() { echo "::error::$1"; exit 1; }
+          is_on() { [[ "$1" == "on" || "$1" == "true" ]]; }
+
+          DEFCONFIG_NAME="${KERNEL_DEVICE}_defconfig"
+          SRC="$PWD/common_${KERNEL_DEVICE}/common"
+          DIST_DIR="$PWD/out/dist"
+
+          log "Preparing environment"
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq aria2 ccache binutils jq zip >/dev/null
+          mkdir -p "common_${KERNEL_DEVICE}" .ccache ~/.local/bin
+          curl -s https://storage.googleapis.com/git-repo-downloads/repo > ~/.local/bin/repo
+          chmod +x ~/.local/bin/repo
+          export PATH="$HOME/.local/bin:$PATH"
+          ccache -M 5G
+          ccache -z
+
+          log "Freeing disk space"
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/share/boost "${AGENT_TOOLSDIRECTORY:-}"
+          sudo docker image prune --all --force 2>/dev/null || true
+
+          log "Adding swap"
+          sudo swapoff /swapfile 2>/dev/null || true
+          sudo dd if=/dev/zero of=/swapfile bs=1M count=8192 status=none
+          sudo chmod 600 /swapfile
+          sudo mkswap /swapfile
+          sudo swapon /swapfile
+
+          log "Cloning kernel source ($KERNEL_BRANCH)"
+          git clone --recursive --branch "$KERNEL_BRANCH" "$KERNEL_URL" "$SRC" --depth=1
+
+          VER="$(sed -n 's/^VERSION *= *//p' "$SRC/Makefile").$(sed -n 's/^PATCHLEVEL *= *//p' "$SRC/Makefile")"
+          SUB="$(sed -n 's/^SUBLEVEL *= *//p' "$SRC/Makefile")"
+          [[ -n "$SUB" && "$SUB" != "0" ]] && VER="$VER.$SUB"
+          echo "KERNEL_VERSION=$VER" >> "$GITHUB_ENV"
+          log "Kernel version: $VER"
+
+          if [ -n "$KERNEL_SPOOF_VERSION" ]; then
+            log "Spoofing kernel version to ${KERNEL_SPOOF_VERSION}${LOCAL_VERSION}"
+            cd "$SRC"
+            sed -i "s/^KERNELVERSION =.*/KERNELVERSION = ${KERNEL_SPOOF_VERSION}${LOCAL_VERSION}/" Makefile
+            echo "" > .scmversion
+            sed -i 's/echo "\$res"/#echo "\$res"/g' scripts/setlocalversion
+            CFGF="arch/arm64/configs/$DEFCONFIG_NAME"
+            sed -i '/CONFIG_LOCALVERSION/d; /CONFIG_LOCALVERSION_AUTO/d' "$CFGF"
+            echo "CONFIG_LOCALVERSION=\"$LOCAL_VERSION\"" >> "$CFGF"
+            echo "CONFIG_LOCALVERSION_AUTO=n" >> "$CFGF"
+            [ -f build.config.constants ] && sed -i "s/^KERNEL_VERSION=.*/KERNEL_VERSION=${KERNEL_SPOOF_VERSION}${LOCAL_VERSION}/" build.config.constants
+          fi
+
+          if is_on "$SPOOF_INTEGRITY"; then
+            log "Applying integrity spoof patch"
+            cd "$SRC"
+            curl -L -s -f -o spoof.patch "https://raw.githubusercontent.com/ShiningAsStar/extra_kernel_stuff/main/patches/spoof-kernel-integrity.patch"
+            patch -p1 --forward < spoof.patch || true
+            rm -f spoof.patch
+          fi
+
+          log "Syncing build tools"
+          cd "$PWD"
+          repo init -u https://android.googlesource.com/kernel/manifest -b "$ANDROID_BRANCH" --depth=1
+          repo sync -c --optimized-fetch --prune --no-clone-bundle --no-tags --force-sync --fail-fast -j"$(nproc)"
+
+          if [ "$CLANG_VERSION" = "AOSP" ]; then
+            log "Fetching latest AOSP clang"
+            cd "$PWD"
+            CLANG_TAG="$(curl -s "https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+/refs/heads/main/?format=JSON" | sed '1d' | jq -r '.entries[].name' | grep -E '^clang-r[0-9]+' | head -n1 || true)"
+            [ -z "$CLANG_TAG" ] && CLANG_TAG="clang-r547379"
+            log "Using $CLANG_TAG"
+            rm -rf .repo common
+            mkdir -p "prebuilts/clang/host/linux-x86/$CLANG_TAG"
+            aria2c -x16 -s16 -j16 --console-log-level=warn --summary-interval=0 -o clang.tar.gz \
+              "https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/main/${CLANG_TAG}.tar.gz"
+            tar -xzf clang.tar.gz -C "prebuilts/clang/host/linux-x86/$CLANG_TAG" --strip-components=1 2>/dev/null || tar -xzf clang.tar.gz -C "prebuilts/clang/host/linux-x86/$CLANG_TAG"
+            rm -f clang.tar.gz
+            find prebuilts/clang/host/linux-x86 -maxdepth 1 -type d ! -name host ! -name "$CLANG_TAG" -exec rm -rf {} +
+            sed -i -e 's/^BRANCH=.*/BRANCH=android13-5.15/' -e "s/^CLANG_VERSION=.*/CLANG_VERSION=$CLANG_TAG/" "$SRC/build.config.constants"
+          else
+            log "Fetching latest ZyCromerZ clang"
+            cd "$PWD"
+            URL="$(curl -sL "https://api.github.com/repos/ZyCromerZ/Clang/releases/latest" | jq -r '.assets[] | select(.name | endswith(".tar.gz")) | .browser_download_url' | head -n1 || true)"
+            [ -z "$URL" ] && URL="https://github.com/ZyCromerZ/Clang/releases/download/16.0.6-20260807-release/Clang-16.0.6-20260807.tar.gz"
+            log "Using $(basename "$URL")"
+            mkdir -p clang
+            aria2c -x16 -s16 -j16 --console-log-level=warn --summary-interval=0 -o clang.tar.gz "$URL"
+            tar -C clang -zxf clang.tar.gz && rm clang.tar.gz
+            export PATH="$PWD/clang/bin:$PATH"
+            clang --version | head -n1 | sed 's/^/==> /'
+          fi
+
+          sed -i '/^DEFCONFIG=gki_defconfig/d' "$SRC/build.config.gki"
+          echo "DEFCONFIG=$DEFCONFIG_NAME" >> "$SRC/build.config.gki"
+          sed -i '/^POST_DEFCONFIG_CMDS="check_defconfig"/d' "$SRC/build.config.gki"
+          sed -i \
+            -e '/^KMI_SYMBOL_LIST_STRICT_MODE=/d' -e '/^TRIM_NONLISTED_KMI=/d' -e '/^KMI_ENFORCED=/d' \
+            -e '$a\KMI_SYMBOL_LIST_STRICT_MODE=0' -e '$a\TRIM_NONLISTED_KMI=0' -e '$a\KMI_ENFORCED=0' \
+            -e '/^MODULES_ORDER=/d' -e '/^MODULES_LIST=/d' \
+            "$SRC/build.config.gki.aarch64"
+
+          log "Configuring defconfig"
+          cd "$SRC"
+          CFGF="arch/arm64/configs/$DEFCONFIG_NAME"
+          sed -i '/CONFIG_CC_OPTIMIZE_FOR_PERFORMANCE\b/d; /CONFIG_CC_OPTIMIZE_FOR_PERFORMANCE_O3/d; /CONFIG_CC_OPTIMIZE_FOR_SIZE/d' "$CFGF"
+          case "$OPT_LEVEL" in
+            O2) echo "CONFIG_CC_OPTIMIZE_FOR_PERFORMANCE=y"    >> "$CFGF" ;;
+            O3) echo "CONFIG_CC_OPTIMIZE_FOR_PERFORMANCE_O3=y" >> "$CFGF" ;;
+            Os) echo "CONFIG_CC_OPTIMIZE_FOR_SIZE=y"           >> "$CFGF" ;;
+          esac
+          if [ "$TICK_RATE" != "default" ]; then
+            sed -i '/^CONFIG_HZ_/d; /^CONFIG_HZ=/d' "$CFGF"
+            printf 'CONFIG_NO_HZ_IDLE=y\nCONFIG_HZ=%s\nCONFIG_HZ_%s=y\n' "$TICK_RATE" "$TICK_RATE" >> "$CFGF"
+          fi
+          sed -i '/^CONFIG_LTO_CLANG/d; /^CONFIG_THINLTO/d' "$CFGF"
+          if [ "$LTO_TYPE" = "thin" ]; then
+            printf 'CONFIG_LTO_CLANG=y\nCONFIG_LTO_CLANG_THIN=y\nCONFIG_THINLTO=y\n' >> "$CFGF"
+          else
+            printf 'CONFIG_LTO_CLANG=y\nCONFIG_LTO_CLANG_FULL=y\n' >> "$CFGF"
+          fi
+
+          cat >> "$CFGF" << ENDEOFMARK
+          CONFIG_CPU_FREQ_GOV_SCHEDUTIL=y
+          CONFIG_CPU_FREQ_DEFAULT_GOV_SCHEDUTIL=y
+          # CONFIG_SCHED_WALT is not set
+          # CONFIG_SCHED_WALT_DEBUG is not set
+          CONFIG_TCP_CONG_ADVANCED=y
+          # CONFIG_TCP_CONG_BBR is not set
+          CONFIG_TCP_CONG_BBR3=y
+          CONFIG_TCP_CONG_WESTWOOD=y
+          # CONFIG_TCP_CONG_BIC is not set
+          # CONFIG_TCP_CONG_HTCP is not set
+          CONFIG_DEFAULT_TCP_CONG="bbr3"
+          CONFIG_NET_SCH_FQ=y
+          # CONFIG_NET_SCH_FQ_CODEL is not set
+          CONFIG_NET_SCH_CAKE=y
+          CONFIG_NET_SCH_PIE=y
+          CONFIG_NET_SCH_DEFAULT=y
+          CONFIG_DEFAULT_FQ=y
+          CONFIG_DEFAULT_NET_SCH="fq"
+          # CONFIG_IOSCHED_BFQ is not set
+          # CONFIG_BFQ_GROUP_IOSCHED is not set
+          CONFIG_MQ_IOSCHED_DEADLINE=y
+          CONFIG_DEFAULT_MQ_IOSCHED="mq-deadline"
+          CONFIG_DEFAULT_DEADLINE=y
+          CONFIG_LRU_GEN=y
+          CONFIG_LRU_GEN_ENABLED=y
+          CONFIG_FRAME_WARN=0
+          CONFIG_WQ_POWER_EFFICIENT_DEFAULT=y
+          # CONFIG_SLUB_DEBUG_ON is not set
+          # CONFIG_SLUB_STATS is not set
+          # CONFIG_DEBUG_LIST is not set
+          # CONFIG_DEBUG_KINFO is not set
+          # CONFIG_DEBUG_MEMORY_INIT is not set
+          # CONFIG_RCU_TRACE is not set
+          # CONFIG_PRINTK_CALLER is not set
+          # CONFIG_DEBUG_FS is not set
+          # CONFIG_DEBUG_MISC is not set
+          # CONFIG_UBSAN is not set
+          # CONFIG_F2FS_IOSTAT is not set
+          CONFIG_NTSYNC=y
+          CONFIG_SCHED_BORE=y
+          CONFIG_SCHED_PREFER_SILVER=y
+          # CONFIG_RCU_LAZY_DEFAULT_OFF is not set
+          CONFIG_SCHED_CASS=y
+          CONFIG_MQ_IOSCHED_ADIOS=y
+          ENDEOFMARK
+
+          cd "$SRC"
+          if is_on "$BBG"; then
+            log "Applying Baseband Guard"
+            wget -qO- "https://github.com/vc-teahouse/Baseband-guard/raw/main/setup.sh" | bash
+            echo "CONFIG_BBG=y" >> "$CFGF"
+            sed -i '/^config LSM$/,/^help$/{ /^[[:space:]]*default/{ /baseband_guard/! s/selinux/selinux,baseband_guard/; }; }' security/Kconfig
+          fi
+          if is_on "$DROIDSPACES"; then
+            log "Applying Droidspaces"
+            curl -sL "https://raw.githubusercontent.com/ravindu644/Droidspaces-OSS/main/Documentation/resources/kernel-patches/GKI/below-kernel-6.12/001.GKI-below-6.12-fix_sysvipc_kabi_6_7_8.patch" | git apply -v --ignore-whitespace
+          fi
+
+          KSU_DIR=""
+          case "$VARIANT" in
+            KernelSU)       KSU_REPO="tiann/KernelSU";                KSU_REF="main";    KSU_DIR="KernelSU" ;;
+            KernelSU-Next)  KSU_REPO="KernelSU-Next/KernelSU-Next";   KSU_REF="dev";     KSU_DIR="KernelSU-Next" ;;
+            ReSukiSU)       KSU_REPO="ReSukiSU/ReSukiSU";             KSU_REF="main";    KSU_DIR="KernelSU" ;;
+            SukiSU-Ultra)   KSU_REPO="SukiSU-Ultra/SukiSU-Ultra";     KSU_REF="builtin"; KSU_DIR="KernelSU" ;;
+          esac
+
+          if [ -n "$KSU_DIR" ]; then
+            log "Setting up $VARIANT"
+            cd "$SRC"
+            rm -rf KernelSU KernelSU-Next drivers/kernelsu
+            git clone --depth=64 "https://github.com/$KSU_REPO.git" -b "$KSU_REF" /tmp/ksu-src
+            SETUP="/tmp/ksu-src/kernel/setup.sh"
+            [ -f "$SETUP" ] || SETUP="/tmp/ksu-src/setup.sh"
+            bash "$SETUP" "$KSU_REF"
+
+            COMMITS=$(git -C /tmp/ksu-src rev-list --count HEAD)
+            KSU_VERSION=$((30000 + COMMITS))
+            KSU_COMMIT=$(git -C /tmp/ksu-src rev-parse --short HEAD)
+            KSU_TAG=$(git -C /tmp/ksu-src describe --tags --abbrev=0 2>/dev/null || echo "unknown")
+            echo "KSU_VER=${KSU_TAG}-${KSU_COMMIT}" >> "$GITHUB_ENV"
+
+            if [ -f "$SRC/$KSU_DIR/Kbuild" ]; then
+              sed -i "s/^KSU_VERSION_FALLBACK := .*/KSU_VERSION_FALLBACK := ${KSU_VERSION}/" "$SRC/$KSU_DIR/Kbuild" || true
+              if [ -n "$LOCAL_VERSION" ]; then
+                sed -i "s|\(-DKSU_VERSION_FULL=[^\"]*\)\"|\1${LOCAL_VERSION}\"|" "$SRC/$KSU_DIR/Kbuild" || true
+              fi
+            fi
+            rm -rf /tmp/ksu-src
+
+            if is_on "$ENABLE_SUSFS"; then
+              log "Setting up SuSFS"
+              cd "$SRC"
+              git clone --depth=1 "https://gitlab.com/simonpunk/susfs4ksu.git" -b "gki-android13-5.15" susfs
+              mkdir -p include/linux fs
+              cp -f susfs/kernel_patches/include/linux/susfs.h include/linux/
+              cp -f susfs/kernel_patches/include/linux/susfs_def.h include/linux/
+              cp -f susfs/kernel_patches/fs/susfs.c fs/
+              curl -Lso susfs_kernel.patch "https://raw.githubusercontent.com/ShiningAsStar/extra_kernel_stuff/main/patches/50_add_susfs_in_gki-android13-5.15.patch"
+              patch -p1 --forward < susfs_kernel.patch || true
+              rm -f susfs_kernel.patch
+              case "$VARIANT" in
+                KernelSU)
+                  cd KernelSU
+                  [ -f kernel/Kbuild ] && sed -i 's|kernel/Makefile|kernel/Kbuild|g' ../susfs/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch
+                  patch -p1 --forward --fuzz=3 < ../susfs/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch || true
+                  cd ..
+                  ;;
+                KernelSU-Next)
+                  patch -p2 --forward --fuzz=3 -d drivers/kernelsu < susfs/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch || true
+                  ;;
+              esac
+              rm -rf susfs
+            fi
+
+            cat >> "$CFGF" << ENDEOFMARK
+          CONFIG_KSU=y
+          CONFIG_KPROBES=y
+          CONFIG_OVERLAY_FS=y
+          CONFIG_TMPFS_XATTR=y
+          CONFIG_TMPFS_POSIX_ACL=y
+          CONFIG_KALLSYMS=y
+          ENDEOFMARK
+            if is_on "$ENABLE_SUSFS"; then
+              [ "$VARIANT" = "ReSukiSU" ] && printf '# CONFIG_KSU_TRACEPOINT_HOOK is not set\n# CONFIG_KSU_MANUAL_HOOK is not set\n' >> "$CFGF"
+              cat >> "$CFGF" << ENDEOFMARK
+          CONFIG_KSU_SUSFS=y
+          CONFIG_KSU_SUSFS_HAS_MAGIC_MOUNT=y
+          CONFIG_KSU_SUSFS_SUS_PATH=y
+          CONFIG_KSU_SUSFS_SUS_MOUNT=y
+          CONFIG_KSU_SUSFS_AUTO_ADD_SUS_KSU_DEFAULT_MOUNT=y
+          CONFIG_KSU_SUSFS_AUTO_ADD_SUS_BIND_MOUNT=y
+          CONFIG_KSU_SUSFS_AUTO_ADD_TRY_UMOUNT_FOR_BIND_MOUNT=y
+          CONFIG_KSU_SUSFS_SUS_KSTAT=y
+          CONFIG_KSU_SUSFS_TRY_UMOUNT=y
+          CONFIG_KSU_SUSFS_SPOOF_UNAME=y
+          CONFIG_KSU_SUSFS_ENABLE_LOG=y
+          CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS=y
+          CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG=y
+          CONFIG_KSU_SUSFS_OPEN_REDIRECT=y
+          CONFIG_KSU_SUSFS_SUS_MAP=y
+          CONFIG_KSU_SUSFS_SUS_SU=y
+          ENDEOFMARK
+            fi
+          fi
+
+          log "Compiling kernel"
+          cd "$PWD"
+          export CCACHE=1
+          export CCACHE_DIR="$PWD/.ccache"
+          EXTRA=""
+          [ "$VARIANT" = "ReSukiSU" ] && EXTRA="LLVM=1 LLVM_IAS=1"
+          if [ "$CLANG_VERSION" = "AOSP" ]; then
+            LTO="$LTO_TYPE" \
+              BUILD_CONFIG="common_${KERNEL_DEVICE}/common/build.config.gki.aarch64" \
+              build/build.sh -j"$(nproc --all)" $EXTRA
+          else
+            LTO="$LTO_TYPE" \
+              BUILD_CONFIG="common_${KERNEL_DEVICE}/common/build.config.gki.aarch64" \
+              build/build.sh -j"$(nproc --all)" CC=clang CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE=aarch64-linux-gnu- $EXTRA
+          fi
+          log "ccache stats:"
+          ccache -s || true
+
+          DIST_DIR="$(find out -maxdepth 3 -type d -name dist 2>/dev/null | head -n1)"
+          [ -z "$DIST_DIR" ] && DIST_DIR="out/dist"
+          [ -f "$DIST_DIR/Image" ] || die "Kernel image missing"
+          log "Dist dir: $DIST_DIR"
+
+          if is_on "$KPM"; then
+            log "Applying KPM patch"
+            cd "$DIST_DIR"
+            KPM_URL="$(curl -sL "https://api.github.com/repos/SukiSU-Ultra/SukiSU_KernelPatch_patch/releases/latest" | jq -r '.assets[] | select(.name == "patch_linux") | .browser_download_url' | head -n1 || true)"
+            [ -z "$KPM_URL" ] && KPM_URL="https://github.com/SukiSU-Ultra/SukiSU_KernelPatch_patch/releases/download/0.13.0/patch_linux"
+            log "Using $(basename "$KPM_URL")"
+            curl -fL -s -o patch_linux "$KPM_URL"
+            chmod +x patch_linux && ./patch_linux
+            [ -f oImage ] && mv -f oImage Image
+          fi
+
+          log "Packaging AnyKernel3"
+          cd "$PWD"
+          git clone --depth=1 "$AK3_URL" AK3
+          rm -rf AK3/.git
+          cp "$DIST_DIR/Image" "AK3/Image.${VARIANT}"
+
+          ZIP_NAME="${VARIANT}_AK3_${KERNEL_BRANCH}_$(date +'%Y-%m-%d')"
+          cd AK3
+          zip -r9 "../${ZIP_NAME}.zip" . -x ".git*" > /dev/null
+          cd ..
+          echo "ZIP_NAME=${ZIP_NAME}.zip" >> "$GITHUB_ENV"
+          log "Done: ${ZIP_NAME}.zip"
+
+      - name: ccache stats
+        if: always()
+        run: ccache -s || true
 
       - name: Upload artifact
         if: success()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: ${{ env.ZIP_NAME }}
-          path: ${{ env.AK3_DIR }}
+          path: ${{ env.ZIP_NAME }}
           retention-days: 3
-
-      - name: Telegram notify
-        if: always()
-        shell: bash
-        env:
-          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_USER_ID }}
-          BUILD_STATUS: ${{ job.status }}
-          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-          VARIANT: ${{ inputs.variant }}
-          KERNEL_BRANCH: ${{ inputs.kernelBranch }}
-          CLANG_VERSION: ${{ inputs.clangVersion }}
-          LTO_TYPE: ${{ inputs.LtoOptimizations }}
-          OPT_LEVEL: ${{ inputs.optimizationLevel }}
-          TICK_RATE: ${{ inputs.tickRate }}
-          ENABLE_SUSFS: ${{ inputs.SUSFS }}
-          BBG: ${{ inputs.bbg }}
-          KPM: ${{ inputs.KPM }}
-          DROIDSPACES: ${{ inputs.droidspaces }}
-          SPOOF_INTEGRITY: ${{ inputs.spoofIntegrity }}
-          KSUVER: ${{ env.KSUVER }}
-          KERNEL_VERSION: ${{ env.KERNEL_MAKE_VERSION }}
-          SPOOFED_VERSION: ${{ inputs.kernelSpoofVersion }}
-          LOCAL_VERSION: ${{ inputs.localVersion }}
-          ZIP_PATH: ${{ env.ZIP_PATH }}
-        run: python3 configuration/notify.py
