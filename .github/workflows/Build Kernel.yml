@@ -1,0 +1,182 @@
+name: "Build Kernel"
+
+env:
+  CCACHE_COMPILERCHECK: "%compiler% -dumpmachine; %compiler% -dumpversion"
+  CCACHE_NOHASHDIR: "true"
+  CCACHE_HARDLINK: "true"
+  CCACHE_DIR: "/home/runner/.ccache"
+  CCACHE_MAXSIZE: "8G"
+
+on:
+  workflow_dispatch:
+    inputs:
+      ksuVariant:
+        description: "Kernel variant"
+        required: true
+        type: choice
+        default: "Vanilla"
+        options:
+          - "Vanilla"
+          - "KernelSU"
+          - "KernelSU-Next"
+          - "SukiSU-Ultra"
+          - "ReSukiSU"
+      kernelSourceURL:
+        description: "Kernel source URL"
+        required: true
+        type: string
+        default: "https://github.com/JustAnSasha/kernel_redmi-5.15"
+      kernelBranch:
+        description: "Kernel branch"
+        required: true
+        type: choice
+        default: "shining"
+        options:
+          - "shining"
+      kernelDevice:
+        description: "Device (used for defconfig)"
+        required: true
+        type: string
+        default: "gki"
+      kernelSpoofVersion:
+        description: "Spoof kernel version (X.Y.Z)"
+        required: false
+        type: string
+        default: "6.1.100"
+      localVersion:
+        description: "Custom localversion"
+        required: false
+        type: string
+        default: "-Shiney"
+      SUSFS:
+        description: "Enable SuSFS"
+        required: true
+        type: boolean
+        default: true
+      optimizationLevel:
+        description: "Compiler optimization level"
+        required: false
+        type: choice
+        default: "O3"
+        options:
+          - "O2"
+          - "O3"
+          - "Os"
+      clangVersion:
+        description: "Clang toolchain"
+        required: true
+        type: choice
+        default: "ZyCromerZ"
+        options:
+          - "ZyCromerZ"
+          - "AOSP"
+      LtoOptimizations:
+        description: "LTO type"
+        required: true
+        type: choice
+        default: "thin"
+        options:
+          - "thin"
+          - "full"
+      bbg:
+        description: "Baseband-guard"
+        required: true
+        type: choice
+        default: "on"
+        options:
+          - "on"
+          - "off"
+      KPM:
+        description: "Kernel Patch Module"
+        required: true
+        type: choice
+        default: "off"
+        options:
+          - "on"
+          - "off"
+      droidspaces:
+        description: "Droidspaces support"
+        required: true
+        type: choice
+        default: "off"
+        options:
+          - "on"
+          - "off"
+      spoofIntegrity:
+        description: "Spoof device state"
+        required: true
+        type: choice
+        default: "on"
+        options:
+          - "on"
+          - "off"
+      saveCache:
+        description: "Save/restore ccache"
+        required: true
+        type: boolean
+        default: true
+
+jobs:
+  Build-Kernel:
+    name: "Build kernel ${{ github.event.inputs.ksuVariant }}"
+    runs-on: ubuntu-latest
+    steps:
+      - name: "🗑️ Free disk space"
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc "/usr/local/share/boost" "$AGENT_TOOLSDIRECTORY"
+          sudo docker image prune --all --force
+          sudo docker builder prune -a -f
+
+      - name: "📐 Setup SWAP 8GB"
+        uses: pierotofy/set-swap-space@master
+        with:
+          swap-size-gb: 8
+
+      - name: "📐 Tune Swap"
+        run: |
+          echo "vm.swappiness=80" | sudo tee -a /etc/sysctl.conf
+          sudo sysctl -p
+
+      - name: "💾 Restore ccache"
+        if: inputs.saveCache
+        uses: actions/cache@v4
+        with:
+          path: /home/runner/.ccache
+          key: ccache-${{ runner.os }}-${{ inputs.ksuVariant }}-${{ inputs.clangVersion }}-${{ github.ref }}
+          restore-keys: |
+            ccache-${{ runner.os }}-${{ inputs.ksuVariant }}-${{ inputs.clangVersion }}-
+
+      - name: "📥 Checkout scripts"
+        uses: actions/checkout@v4
+
+      - name: "🛠️ Prepare environment"
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y repo rsync aria2 ccache binutils gcc
+          mkdir -p common_${{ inputs.kernelDevice }}
+
+      - name: "🚀 Build kernel"
+        env:
+          INPUT_KSUVARIANT: ${{ inputs.ksuVariant }}
+          INPUT_KERNELSOURCEURL: ${{ inputs.kernelSourceURL }}
+          INPUT_KERNELBRANCH: ${{ inputs.kernelBranch }}
+          INPUT_KERNELDEVICE: ${{ inputs.kernelDevice }}
+          INPUT_KERNELSPOOFVERSION: ${{ inputs.kernelSpoofVersion }}
+          INPUT_LOCALVERSION: ${{ inputs.localVersion }}
+          INPUT_SUSFS: ${{ inputs.SUSFS }}
+          INPUT_OPTIMIZATIONLEVEL: ${{ inputs.optimizationLevel }}
+          INPUT_CLANGVERSION: ${{ inputs.clangVersion }}
+          INPUT_LTOOPTIMIZATIONS: ${{ inputs.LtoOptimizations }}
+          INPUT_BBG: ${{ inputs.bbg }}
+          INPUT_KPM: ${{ inputs.KPM }}
+          INPUT_DROIDSPACES: ${{ inputs.droidspaces }}
+          INPUT_SPOOFINTEGRITY: ${{ inputs.spoofIntegrity }}
+          INPUT_SAVECACHE: ${{ inputs.saveCache }}
+        run: python3 .github/scripts/build.py
+
+      - name: "📤 Upload artifact"
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.ZIP_NAME }}
+          path: ${{ env.AK3_DIR }}
+          retention-days: 3
